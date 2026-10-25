@@ -1,2 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Marketgrade.Engine.Tests" />
+    <InternalsVisibleTo Include="Marketgrade.Benchmarks" />
+  </ItemGroup>
 </Project>
