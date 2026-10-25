@@ -1,12 +1,23 @@
 import { useEffect, useState } from "react";
-import { getBackendStatus, type BackendStatus } from "@/api";
+import {
+  getBackendStatus,
+  getEngineStatus,
+  type BackendStatus,
+  type ConnectionEvent,
+  type EngineStatus,
+  type ExchangeStatus,
+} from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatSinceLastMessage, stateBadge } from "@/exchangeState";
+
+const POLL_INTERVAL_MS = 1000;
+const RECENT_EVENTS = 10;
 
 type ConnectionState =
   | { kind: "starting" }
-  | { kind: "connected"; status: BackendStatus }
+  | { kind: "connected"; backend: BackendStatus; engine: EngineStatus | null }
   | { kind: "error"; message: string };
 
 export default function App() {
@@ -15,17 +26,33 @@ export default function App() {
 
   useEffect(() => {
     let current = true;
-    getBackendStatus().then(
-      (status) => current && setState({ kind: "connected", status }),
-      (error: unknown) =>
-        current &&
-        setState({
-          kind: "error",
-          message: error instanceof Error ? error.message : String(error),
-        }),
-    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const fail = (error: unknown) =>
+      current &&
+      setState({
+        kind: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+
+    // Polls the engine once per second until the backend stops answering.
+    const poll = (backend: BackendStatus) =>
+      getEngineStatus().then((engine) => {
+        if (current) {
+          setState({ kind: "connected", backend, engine });
+          timer = setTimeout(() => void poll(backend), POLL_INTERVAL_MS);
+        }
+      }, fail);
+
+    getBackendStatus().then((backend) => {
+      if (current) {
+        setState({ kind: "connected", backend, engine: null });
+        void poll(backend);
+      }
+    }, fail);
+
     return () => {
       current = false;
+      clearTimeout(timer);
     };
   }, [attempt]);
 
@@ -34,53 +61,122 @@ export default function App() {
     setAttempt((n) => n + 1);
   };
 
+  const engine = state.kind === "connected" ? state.engine : null;
+
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center gap-8 p-8">
-      <h1 className="text-3xl font-semibold tracking-tight">Marketgrade</h1>
-      <Card className="w-full max-w-md">
-        {state.kind === "starting" && (
+    <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 p-8">
+      <header className="flex flex-wrap items-baseline justify-between gap-4">
+        <h1 className="text-2xl font-semibold tracking-tight">Marketgrade</h1>
+        <BackendLine state={state} />
+      </header>
+
+      {state.kind === "error" && (
+        <Card>
           <CardHeader>
-            <CardTitle>Starting backend...</CardTitle>
-            <CardDescription>
-              <Badge className="bg-warning/15 text-warning">Starting</Badge>
-            </CardDescription>
+            <CardTitle>Backend not reachable</CardTitle>
           </CardHeader>
-        )}
+          <CardContent className="flex flex-col items-start gap-4">
+            <p className="font-mono text-sm break-all text-muted-foreground">{state.message}</p>
+            <Button onClick={retry}>Retry</Button>
+          </CardContent>
+        </Card>
+      )}
 
-        {state.kind === "connected" && (
-          <>
-            <CardHeader>
-              <CardTitle>Backend connected</CardTitle>
-              <CardDescription>
-                <Badge className="bg-buy/15 text-buy">Online</Badge>
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
-                <dt className="text-muted-foreground">Version</dt>
-                <dd className="font-mono">{state.status.health.version}</dd>
-                <dt className="text-muted-foreground">Port</dt>
-                <dd className="font-mono">{state.status.port}</dd>
-              </dl>
-            </CardContent>
-          </>
-        )}
+      <Card>
+        <CardHeader>
+          <CardTitle>Exchanges</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {engine ? (
+            <ExchangeTable exchanges={engine.status.exchanges} />
+          ) : (
+            <p className="text-muted-foreground">Waiting for the engine...</p>
+          )}
+        </CardContent>
+      </Card>
 
-        {state.kind === "error" && (
-          <>
-            <CardHeader>
-              <CardTitle>Backend not reachable</CardTitle>
-              <CardDescription>
-                <Badge className="bg-sell/15 text-sell">Offline</Badge>
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex flex-col items-start gap-4">
-              <p className="font-mono text-sm break-all text-muted-foreground">{state.message}</p>
-              <Button onClick={retry}>Retry</Button>
-            </CardContent>
-          </>
-        )}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent events</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RecentEvents events={engine?.events ?? []} />
+        </CardContent>
       </Card>
     </main>
+  );
+}
+
+function BackendLine({ state }: { state: ConnectionState }) {
+  return (
+    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+      {state.kind === "connected" && (
+        <span className="font-mono">
+          Backend {state.backend.health.version} · port {state.backend.port}
+        </span>
+      )}
+      {state.kind === "starting" && <Badge className="bg-warning/15 text-warning">Starting</Badge>}
+      {state.kind === "connected" && <Badge className="bg-buy/15 text-buy">Online</Badge>}
+      {state.kind === "error" && <Badge className="bg-sell/15 text-sell">Offline</Badge>}
+    </div>
+  );
+}
+
+function ExchangeTable({ exchanges }: { exchanges: ExchangeStatus[] }) {
+  return (
+    <table className="w-full text-sm">
+      <thead className="text-left text-muted-foreground">
+        <tr>
+          <th className="pb-2 font-normal">Exchange</th>
+          <th className="pb-2 font-normal">Pair</th>
+          <th className="pb-2 font-normal">State</th>
+          <th className="pb-2 text-right font-normal">Messages/s</th>
+          <th className="pb-2 text-right font-normal">Last message</th>
+        </tr>
+      </thead>
+      <tbody>
+        {exchanges.map((exchange) => {
+          const badge = stateBadge(exchange.state);
+          return (
+            <tr key={exchange.id} className="border-t" title={exchange.lastError ?? undefined}>
+              <td className="py-2 font-medium">{exchange.name}</td>
+              <td className="py-2 font-mono text-muted-foreground">{exchange.pair}</td>
+              <td className="py-2">
+                <Badge className={badge.className}>{badge.label}</Badge>
+              </td>
+              <td className="py-2 text-right font-mono tabular-nums">
+                {exchange.messagesPerSecond.toFixed(1)}
+              </td>
+              <td className="py-2 text-right font-mono tabular-nums">
+                {formatSinceLastMessage(exchange.msSinceLastMessage)}
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
+function RecentEvents({ events }: { events: ConnectionEvent[] }) {
+  if (events.length === 0) {
+    return <p className="text-muted-foreground">No events yet.</p>;
+  }
+  const recent = events.slice(-RECENT_EVENTS).reverse();
+  return (
+    <ul className="flex flex-col gap-1 text-sm">
+      {recent.map((e, i) => (
+        <li key={`${e.timeUtc}-${e.exchange}-${i}`} className="flex gap-3">
+          <span className="font-mono text-muted-foreground tabular-nums">
+            {new Date(e.timeUtc).toLocaleTimeString()}
+          </span>
+          <span className="w-20 shrink-0 font-medium">{e.exchange}</span>
+          <span>
+            {e.event}
+            {e.detail && <span className="text-muted-foreground"> ({e.detail})</span>}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
