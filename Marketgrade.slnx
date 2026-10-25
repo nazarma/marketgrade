@@ -13,4 +13,7 @@
     <Project Path="tests/Marketgrade.Backend.Tests/Marketgrade.Backend.Tests.csproj" />
     <Project Path="tests/Marketgrade.Engine.Tests/Marketgrade.Engine.Tests.csproj" />
   </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Marketgrade.Probe/Marketgrade.Probe.csproj" />
+  </Folder>
 </Solution>
