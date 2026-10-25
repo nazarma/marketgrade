@@ -69,6 +69,38 @@ public class MarketEngineTests
     }
 
     [Fact]
+    public async Task Status_reports_recording_state_and_sizes()
+    {
+        await using var server = await FakeExchangeServer.StartAsync(async c =>
+        {
+            while (!c.Closed.IsCompleted)
+            {
+                await c.SendAsync("{\"data\":1}");
+                await Task.Delay(5);
+            }
+        });
+        var folder = TestRecordings.CreateFolder();
+        var settings = RecordingSettings.Default(folder) with { WriteInterval = TimeSpan.FromMilliseconds(100) };
+        await using var engine = new MarketEngine(
+            s_fast with { RecordingCheckInterval = TimeSpan.FromMilliseconds(50) },
+            [new TestAdapter(server.Uri, "A")],
+            recording: settings);
+        Assert.Equal(RecordingState.Off, engine.Status.Recording!.State);
+        engine.Start();
+
+        await WaitUntilAsync(() => engine.Status.Recording is { TotalBytes: > 0, TodayBytes: > 0, FreeBytes: > 0 });
+
+        var recording = engine.Status.Recording!;
+        Assert.Equal(RecordingState.Recording, recording.State);
+        Assert.Equal(folder, recording.Folder);
+        Assert.Equal(0, recording.DroppedMessages);
+        Assert.Null(recording.LastError);
+
+        engine.ApplyRecordingSettings(settings with { Enabled = false });
+        await WaitUntilAsync(() => engine.Status.Recording!.State == RecordingState.Off);
+    }
+
+    [Fact]
     public async Task Status_counts_data_messages_per_second_separately_from_heartbeats()
     {
         await using var server = await FakeExchangeServer.StartAsync(async c =>

@@ -79,5 +79,24 @@ internal sealed class RecordingManager
 
     public void Apply(RecordingSettings settings) => Volatile.Write(ref _settings, settings);
 
+    /// <param name="running">False before the engine starts and after it stops: nothing is recorded then.</param>
+    public RecordingStatus BuildStatus(bool running, long droppedMessages)
+    {
+        var settings = Settings;
+        var usage = DiskUsage;
+        var state = !running || !settings.Enabled ? RecordingState.Off
+            : Paused ? RecordingState.PausedLowDisk
+            : _recorders.Any(r => r.State == RecordingState.Error) ? RecordingState.Error
+            : RecordingState.Recording;
+        return new RecordingStatus(
+            state,
+            settings.Folder,
+            usage.TodayBytes,
+            usage.TotalBytes,
+            usage.FreeBytes,
+            droppedMessages,
+            _recorders.Select(r => r.LastError).FirstOrDefault(e => e is not null));
+    }
+
     public void QueueCompression(string path) => CompressionQueue.Writer.TryWrite(path);
 }

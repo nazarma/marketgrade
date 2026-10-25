@@ -59,7 +59,7 @@ public sealed class MarketEngine : IAsyncDisposable
         })];
 
         _metrics.ObserveEngine(ObserveQueueLengths, ObserveConnectionStates);
-        _status = BuildStatus(elapsedSeconds: 0);
+        _status = BuildStatus(elapsedSeconds: 0, running: false);
     }
 
     public MessageBufferPool Pool { get; }
@@ -134,7 +134,7 @@ public sealed class MarketEngine : IAsyncDisposable
             queue.Channel.Writer.TryComplete();
         }
         await Task.WhenAll(_consumerTasks);
-        Volatile.Write(ref _status, BuildStatus(elapsedSeconds: 0));
+        Volatile.Write(ref _status, BuildStatus(elapsedSeconds: 0, running: false));
     }
 
     private async Task StatusLoopAsync()
@@ -146,7 +146,7 @@ public sealed class MarketEngine : IAsyncDisposable
             while (await timer.WaitForNextTickAsync(_stop.Token))
             {
                 var now = Stopwatch.GetTimestamp();
-                Volatile.Write(ref _status, BuildStatus(Stopwatch.GetElapsedTime(last, now).TotalSeconds));
+                Volatile.Write(ref _status, BuildStatus(Stopwatch.GetElapsedTime(last, now).TotalSeconds, running: true));
                 last = now;
                 WarnAboutFullQueues();
             }
@@ -156,7 +156,7 @@ public sealed class MarketEngine : IAsyncDisposable
         }
     }
 
-    private EngineStatus BuildStatus(double elapsedSeconds)
+    private EngineStatus BuildStatus(double elapsedSeconds, bool running)
     {
         var exchanges = new ExchangeStatus[_feeds.Length];
         for (var i = 0; i < _feeds.Length; i++)
@@ -185,7 +185,8 @@ public sealed class MarketEngine : IAsyncDisposable
             feed.LastDataMessages = data;
             feed.LastBytes = bytes;
         }
-        return new EngineStatus(DateTime.UtcNow, exchanges);
+        var recording = _recording?.BuildStatus(running, _feeds.Sum(feed => feed.Connection.RecordingDropped));
+        return new EngineStatus(DateTime.UtcNow, exchanges, recording);
     }
 
     private void WarnAboutFullQueues()
