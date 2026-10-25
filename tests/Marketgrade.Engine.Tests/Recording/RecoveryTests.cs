@@ -22,8 +22,9 @@ public class RecoveryTests
             stream.Write(third.AsSpan(headerLength, RecordFormat.RecordHeaderSize + 5));
         }
 
-        var cut = RecordingRecovery.RecoverExchange(RecordingFiles.ExchangeFolder(folder, "Test"), NullLogger.Instance);
+        var (files, cut) = RecordingRecovery.RecoverExchange(RecordingFiles.ExchangeFolder(folder, "Test"), NullLogger.Instance);
 
+        Assert.Equal(1, files);
         Assert.Equal(RecordFormat.RecordHeaderSize + 5, cut);
         Assert.Equal(validLength, new FileInfo(path).Length);
         Assert.Equal([1, 2], TestRecordings.Read(path).Select(r => r.Seq));
@@ -55,9 +56,9 @@ public class RecoveryTests
         File.WriteAllBytes(compressed, [1, 2, 3]);
         var before = File.ReadAllBytes(path);
 
-        var cut = RecordingRecovery.RecoverExchange(RecordingFiles.ExchangeFolder(folder, "Test"), NullLogger.Instance);
+        var (files, cut) = RecordingRecovery.RecoverExchange(RecordingFiles.ExchangeFolder(folder, "Test"), NullLogger.Instance);
 
-        Assert.Equal(0, cut);
+        Assert.Equal((1, 0), (files, cut));
         Assert.Equal(before, File.ReadAllBytes(path));
         Assert.Equal([1, 2, 3], File.ReadAllBytes(compressed));
     }

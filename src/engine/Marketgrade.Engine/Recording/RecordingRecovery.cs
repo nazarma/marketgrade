@@ -6,13 +6,14 @@ namespace Marketgrade.Engine.Recording;
 internal static class RecordingRecovery
 {
     /// <summary>Repairs every uncompressed file of one exchange and deletes leftovers of interrupted compressions.</summary>
-    /// <returns>The total number of bytes cut.</returns>
-    public static long RecoverExchange(string exchangeFolder, ILogger logger)
+    /// <returns>The number of uncompressed files checked and the total number of bytes cut.</returns>
+    public static (int Files, long Cut) RecoverExchange(string exchangeFolder, ILogger logger)
     {
         if (!Directory.Exists(exchangeFolder))
         {
-            return 0;
+            return (0, 0);
         }
+        var files = 0;
         long cut = 0;
         foreach (var dateFolder in Directory.EnumerateDirectories(exchangeFolder))
         {
@@ -25,11 +26,12 @@ internal static class RecordingRecovery
                 }
                 else if (RecordingFiles.TryParse(path, out var file) && !file.Compressed)
                 {
+                    files++;
                     cut += RecoverFile(path, logger);
                 }
             }
         }
-        return cut;
+        return (files, cut);
     }
 
     /// <summary>

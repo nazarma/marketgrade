@@ -226,11 +226,14 @@ internal sealed class Recorder
         var exchangeFolder = RecordingFiles.ExchangeFolder(_settings.Folder, _adapter.Name);
         try
         {
-            var cut = RecordingRecovery.RecoverExchange(exchangeFolder, _manager.Logger);
+            var started = Stopwatch.GetTimestamp();
+            var (files, cut) = RecordingRecovery.RecoverExchange(exchangeFolder, _manager.Logger);
             if (cut > 0)
             {
                 _manager.Events.Add(_adapter.Name, "Recording repaired", $"{cut} bytes cut after the last valid record");
             }
+            _manager.Logger.LogInformation("{Exchange}: checked {Files} uncompressed recordings in {Ms:0} ms, {Cut} bytes cut",
+                _adapter.Name, files, Stopwatch.GetElapsedTime(started).TotalMilliseconds, cut);
             var currentHour = RecordingFiles.HourOf(_manager.Time.GetUtcNow());
             foreach (var file in RecordingFiles.EnumerateExchange(exchangeFolder))
             {
