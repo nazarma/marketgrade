@@ -1,4 +1,5 @@
 using System.Buffers;
+using Marketgrade.Engine.Recording;
 
 namespace Marketgrade.Engine;
 
@@ -15,6 +16,14 @@ public sealed class MessageBuffer
     public long Seq;
     public long ArrivalUnixNs;
     public int Counter;
+
+    /// <summary>Anything but <see cref="RecordType.Message"/> goes to the recorder only.</summary>
+    public RecordType Type = RecordType.Message;
+
+    /// <summary>Messages dropped for the recorder right before this one, stamped by the connection.</summary>
+    public long GapFirstSeq;
+    public long GapLastSeq;
+    public long GapCount;
 
     private readonly byte[] _standard;
     private readonly MessageBufferPool _pool;
@@ -33,6 +42,10 @@ public sealed class MessageBuffer
         if (Interlocked.Decrement(ref Counter) == 0)
         {
             Length = 0;
+            Type = RecordType.Message;
+            GapFirstSeq = 0;
+            GapLastSeq = 0;
+            GapCount = 0;
             _pool.Return(this);
         }
     }

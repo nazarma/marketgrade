@@ -6,6 +6,7 @@
   <ItemGroup>
     <!-- Kestrel hosts the fake exchange server; the engine itself stays free of ASP.NET Core. -->
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" />
     <PackageReference Include="xunit.v3" />
   </ItemGroup>
   <ItemGroup>

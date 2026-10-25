@@ -38,6 +38,7 @@ public sealed class StatsConsumer(ExchangeAdapter adapter)
     internal void Process(MessageBuffer buffer)
     {
         Debug.Assert(buffer.Length > 0, "Buffer was released before this consumer read it");
+        Debug.Assert(buffer.Type == Recording.RecordType.Message, "Connection records go to the recorder only");
         switch (adapter.Classify(buffer.Span))
         {
             case MessageKind.Data:

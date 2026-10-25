@@ -35,4 +35,7 @@ public sealed record EngineOptions
     public int MaxMessageBytes { get; init; } = 64 * 1024 * 1024;
 
     public int EventLogSize { get; init; } = 200;
+
+    /// <summary>After a write error, a recorder tries again after this delay.</summary>
+    public TimeSpan RecordingRetryDelay { get; init; } = TimeSpan.FromSeconds(5);
 }
