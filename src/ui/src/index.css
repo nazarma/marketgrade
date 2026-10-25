@@ -1,0 +1,89 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+
+/* Marketgrade palette. The app is dark only. */
+:root {
+  color-scheme: dark;
+
+  --mg-background: #0a0d12;
+  --mg-panel: #11151c;
+  --mg-border: #222936;
+  --mg-text: #e8ebf0;
+  --mg-muted-text: #8b95a5;
+  --mg-accent: #5cc8ff;
+  --mg-buy: #3ddc97;
+  --mg-sell: #ff6b78;
+  --mg-warning: #f5b841;
+
+  /* shadcn/ui tokens mapped onto the palette */
+  --background: var(--mg-background);
+  --foreground: var(--mg-text);
+  --card: var(--mg-panel);
+  --card-foreground: var(--mg-text);
+  --popover: var(--mg-panel);
+  --popover-foreground: var(--mg-text);
+  --primary: var(--mg-accent);
+  --primary-foreground: var(--mg-background);
+  --secondary: var(--mg-border);
+  --secondary-foreground: var(--mg-text);
+  --muted: var(--mg-border);
+  --muted-foreground: var(--mg-muted-text);
+  --accent: var(--mg-border);
+  --accent-foreground: var(--mg-text);
+  --destructive: var(--mg-sell);
+  --border: var(--mg-border);
+  --input: var(--mg-border);
+  --ring: var(--mg-accent);
+  --radius: 0.625rem;
+}
+
+@theme inline {
+  --font-sans: "Geist Variable", sans-serif;
+  --font-mono: "Geist Mono Variable", monospace;
+  --font-heading: var(--font-sans);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-buy: var(--mg-buy);
+  --color-sell: var(--mg-sell);
+  --color-warning: var(--mg-warning);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
