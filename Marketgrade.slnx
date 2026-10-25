@@ -15,5 +15,6 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Marketgrade.Probe/Marketgrade.Probe.csproj" />
+    <Project Path="tools/Marketgrade.Reader/Marketgrade.Reader.csproj" />
   </Folder>
 </Solution>

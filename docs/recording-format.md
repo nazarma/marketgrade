@@ -81,3 +81,16 @@ go missing when:
 Records are only ever appended. A crash can leave at most one incomplete record at the end of the
 file. On startup Marketgrade scans every `.mgrec` file, checks each record's length and CRC, and
 truncates the file at the first broken record.
+
+## Reading files
+
+`tools/Marketgrade.Reader` prints, verifies and summarizes `.mgrec` and `.mgrec.zst` files:
+
+```sh
+dotnet run --project tools/Marketgrade.Reader -- cat <file> [--limit N] [--payload]
+dotnet run --project tools/Marketgrade.Reader -- verify <file or folder>
+dotnet run --project tools/Marketgrade.Reader -- stats <recordings folder>
+```
+
+`verify` checks every record's length and CRC and exits with code 1 if any file is broken. The file
+currently being written can end in the middle of a write; verify it after recording has stopped.
