@@ -9,7 +9,7 @@ public class RecordingSettingsTests
     [Fact]
     public void New_write_buffer_size_applies_to_the_next_batch()
     {
-        var harness = new RecorderHarness(s => s with { WriteBufferBytes = 64 * 1024 });
+        using var harness = new RecorderHarness(s => s with { WriteBufferBytes = 64 * 1024 });
         var large = new string('x', 100_000);
         harness.Write(harness.Buffer(1, large, s_t0));
         var path = harness.PathFor(s_t0);
@@ -29,7 +29,7 @@ public class RecordingSettingsTests
     [Fact]
     public void New_folder_gets_the_next_file_and_the_old_file_is_closed()
     {
-        var harness = new RecorderHarness();
+        using var harness = new RecorderHarness();
         harness.Write(harness.Buffer(1, "old folder", s_t0));
         var oldPath = harness.PathFor(s_t0);
 
@@ -48,7 +48,7 @@ public class RecordingSettingsTests
     [Fact]
     public void Turning_recording_off_closes_the_file_and_turning_it_on_resumes_with_a_gap()
     {
-        var harness = new RecorderHarness();
+        using var harness = new RecorderHarness();
         harness.Write(harness.Buffer(1, "on", s_t0));
 
         harness.Manager.Apply(harness.Manager.Settings with { Enabled = false });
@@ -79,7 +79,8 @@ public class RecordingSettingsTests
                 await Task.Delay(2);
             }
         });
-        var folder = TestRecordings.CreateFolder();
+        using var tempFolder = new TempFolder();
+        var folder = tempFolder.Path;
         var settings = RecordingSettings.Default(Path.Combine(folder, "first")) with { WriteInterval = TimeSpan.FromMilliseconds(100) };
         await using var engine = new MarketEngine(
             new EngineOptions { ReconnectDelays = [TimeSpan.FromMilliseconds(50)], PoolSize = 64 },

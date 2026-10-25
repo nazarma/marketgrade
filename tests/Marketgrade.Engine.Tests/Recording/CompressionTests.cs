@@ -9,7 +9,7 @@ public class CompressionTests
     [Fact]
     public async Task Compressed_file_reads_back_identical_and_replaces_the_original()
     {
-        var harness = new RecorderHarness(now: s_t0);
+        using var harness = new RecorderHarness(now: s_t0);
         var path = harness.PathFor(s_t0.AddHours(-1));
         TestRecord[] records = [.. Enumerable.Range(1, 1_000).Select(i => TestRecordings.Message(i, $"{{\"price\":{60_000 + i % 50},\"size\":0.{i}}}"))];
         TestRecordings.Write(path, records);
@@ -27,7 +27,7 @@ public class CompressionTests
     [Fact]
     public async Task Damaged_file_stays_uncompressed_and_leaves_no_temp_file()
     {
-        var harness = new RecorderHarness(now: s_t0);
+        using var harness = new RecorderHarness(now: s_t0);
         var path = harness.PathFor(s_t0.AddHours(-1));
         TestRecordings.Write(path, [TestRecordings.Message(1, "first"), TestRecordings.Message(2, "second")]);
         var bytes = File.ReadAllBytes(path);
@@ -44,7 +44,7 @@ public class CompressionTests
     [Fact]
     public async Task Queued_and_missed_hours_are_compressed_but_not_the_active_file()
     {
-        var harness = new RecorderHarness(now: s_t0);
+        using var harness = new RecorderHarness(now: s_t0);
         var queued = harness.PathFor(s_t0.AddHours(-1));
         var missed = harness.PathFor(s_t0.AddHours(-5));
         TestRecordings.Write(queued, [TestRecordings.Message(1, "queued")]);

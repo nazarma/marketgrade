@@ -7,24 +7,25 @@ using Microsoft.Extensions.Time.Testing;
 namespace Marketgrade.Engine.Tests.Recording;
 
 /// <summary>
-/// One recorder with a fake clock, writing into a temporary folder. Tests either drive it directly
-/// (<see cref="Write"/>, deterministic) or run its loop with <see cref="Start"/> and <see cref="Send"/>.
+/// One recorder with a fake clock, writing into a temporary folder that is deleted on dispose. Tests
+/// either drive it directly (<see cref="Write"/>, deterministic) or run its loop with <see cref="Start"/>
+/// and <see cref="Send"/>, then <see cref="StopAsync"/>.
 /// </summary>
-internal sealed class RecorderHarness
+internal sealed class RecorderHarness : IDisposable
 {
     private readonly Channel<MessageBuffer> _queue = Channel.CreateUnbounded<MessageBuffer>();
+    private readonly TempFolder _folder = new();
     private Task? _run;
 
     public RecorderHarness(Func<RecordingSettings, RecordingSettings>? configure = null, DateTimeOffset? now = null, EngineOptions? options = null)
     {
-        Folder = TestRecordings.CreateFolder();
         Time = new FakeTimeProvider(now ?? new DateTimeOffset(2026, 3, 29, 10, 30, 0, TimeSpan.Zero));
         var settings = RecordingSettings.Default(Path.Combine(Folder, "recordings"));
         Manager = new RecordingManager(configure?.Invoke(settings) ?? settings, options ?? new EngineOptions(), Time, Events, NullLogger.Instance);
         Recorder = Manager.AddRecorder(Adapter);
     }
 
-    public string Folder { get; }
+    public string Folder => _folder.Path;
 
     public FakeTimeProvider Time { get; }
 
@@ -94,6 +95,16 @@ internal sealed class RecorderHarness
             paths.Add(path);
         }
         return paths;
+    }
+
+    /// <summary>Closes a file the test left open, then deletes the folder.</summary>
+    public void Dispose()
+    {
+        if (_run is null)
+        {
+            Recorder.CloseFile();
+        }
+        _folder.Dispose();
     }
 
     public static async Task WaitUntilAsync(Func<bool> condition)

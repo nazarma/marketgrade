@@ -9,7 +9,7 @@ public class RetentionTests
     [Fact]
     public void Recordings_older_than_the_retention_period_are_deleted()
     {
-        var harness = new RecorderHarness(s => s with { KeepDays = 2 }, s_now);
+        using var harness = new RecorderHarness(s => s with { KeepDays = 2 }, s_now);
         var tooOld = CreateFile(harness, s_now.AddDays(-2).AddHours(-1), compressed: true);
         var kept = CreateFile(harness, s_now.AddDays(-2).AddHours(1), compressed: true);
         var other = Path.Combine(Path.GetDirectoryName(tooOld)!, "notes.txt");
@@ -26,7 +26,7 @@ public class RetentionTests
     [Fact]
     public void Oldest_recordings_are_deleted_until_the_total_fits()
     {
-        var harness = new RecorderHarness(s => s with { MaxDiskBytes = 2_500 }, s_now);
+        using var harness = new RecorderHarness(s => s with { MaxDiskBytes = 2_500 }, s_now);
         var files = Enumerable.Range(1, 4).Select(i => CreateFile(harness, s_now.AddHours(-i), compressed: true)).ToList();
         var worker = new RecordingWorker(harness.Manager);
 
@@ -39,7 +39,7 @@ public class RetentionTests
     [Fact]
     public void Retention_never_deletes_the_active_file_or_anything_outside_the_folder_layout()
     {
-        var harness = new RecorderHarness(s => s with { KeepDays = 1, MaxDiskBytes = 0 }, s_now);
+        using var harness = new RecorderHarness(s => s with { KeepDays = 1, MaxDiskBytes = 0 }, s_now);
         var old = CreateFile(harness, s_now.AddDays(-5), compressed: false);
         var oldDateFolder = Path.GetDirectoryName(old)!;
         var currentHour = CreateFile(harness, s_now, compressed: false, exchange: "another");

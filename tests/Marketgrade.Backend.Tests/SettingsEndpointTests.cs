@@ -45,7 +45,8 @@ public class SettingsEndpointTests
     [Fact]
     public async Task Valid_settings_are_saved_and_survive_a_restart()
     {
-        var dataFolder = Path.Combine(Path.GetTempPath(), "marketgrade-tests", Guid.NewGuid().ToString("N"));
+        using var tempFolder = new TempFolder();
+        var dataFolder = tempFolder.Path;
         var settings = ValidSettings(dataFolder);
         settings["enabled"] = false;
         settings["keepDays"] = 30;

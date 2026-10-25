@@ -53,7 +53,8 @@ public class MarketEngineTests
             }
             await c.Closed;
         });
-        var folder = TestRecordings.CreateFolder();
+        using var tempFolder = new TempFolder();
+        var folder = tempFolder.Path;
         var engine = new MarketEngine(s_fast, [new TestAdapter(server.Uri, "A")], recording: RecordingSettings.Default(folder));
         engine.Start();
         await WaitUntilAsync(() => engine.Status.Exchanges[0].DataMessages == 500);
@@ -79,7 +80,8 @@ public class MarketEngineTests
                 await Task.Delay(5);
             }
         });
-        var folder = TestRecordings.CreateFolder();
+        using var tempFolder = new TempFolder();
+        var folder = tempFolder.Path;
         var settings = RecordingSettings.Default(folder) with { WriteInterval = TimeSpan.FromMilliseconds(100) };
         await using var engine = new MarketEngine(
             s_fast with { RecordingCheckInterval = TimeSpan.FromMilliseconds(50) },

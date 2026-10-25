@@ -9,7 +9,7 @@ public class LowDiskTests
     [Fact]
     public void Recording_pauses_on_low_disk_and_resumes_with_a_gap_record()
     {
-        var harness = new RecorderHarness(now: s_t0);
+        using var harness = new RecorderHarness(now: s_t0);
         long free = 10 * RecordingSettings.GB;
         var worker = new RecordingWorker(harness.Manager, _ => free);
         harness.Write(harness.Buffer(1, "before", s_t0));
@@ -45,7 +45,7 @@ public class LowDiskTests
     [Fact]
     public void Disk_check_reports_total_and_today_sizes()
     {
-        var harness = new RecorderHarness(now: s_t0);
+        using var harness = new RecorderHarness(now: s_t0);
         var yesterday = harness.PathFor(s_t0.AddDays(-1), compressed: true);
         var today = harness.PathFor(s_t0.AddHours(-2), compressed: true);
         foreach (var (path, size) in new[] { (yesterday, 300), (today, 200) })

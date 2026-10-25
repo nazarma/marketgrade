@@ -11,7 +11,7 @@ public class RecorderTests
     public void Every_record_reads_back_identical_with_valid_crcs()
     {
         // A small write buffer, so the large message goes straight to the file.
-        var harness = new RecorderHarness(s => s with { WriteBufferBytes = 64 * 1024 });
+        using var harness = new RecorderHarness(s => s with { WriteBufferBytes = 64 * 1024 });
         var large = new string('x', 100_000);
 
         harness.Write(
@@ -40,7 +40,7 @@ public class RecorderTests
     {
         var beforeMidnight = new DateTimeOffset(2026, 3, 29, 23, 59, 59, 900, TimeSpan.Zero);
         var afterMidnight = beforeMidnight.AddMilliseconds(200);
-        var harness = new RecorderHarness(now: afterMidnight.AddSeconds(5));
+        using var harness = new RecorderHarness(now: afterMidnight.AddSeconds(5));
 
         harness.Write(
             harness.Buffer(1, "late in hour 23", beforeMidnight),
@@ -62,7 +62,7 @@ public class RecorderTests
     [Fact]
     public void Reopening_an_hour_appends_to_its_file()
     {
-        var harness = new RecorderHarness();
+        using var harness = new RecorderHarness();
         harness.Write(harness.Buffer(1, "first", s_t0));
         harness.Close();
 
@@ -77,7 +77,7 @@ public class RecorderTests
     [Fact]
     public void An_hour_that_is_already_compressed_continues_in_a_second_part()
     {
-        var harness = new RecorderHarness();
+        using var harness = new RecorderHarness();
         var compressed = harness.PathFor(s_t0, compressed: true);
         Directory.CreateDirectory(Path.GetDirectoryName(compressed)!);
         File.WriteAllBytes(compressed, [1]);
@@ -92,7 +92,7 @@ public class RecorderTests
     [Fact]
     public void Gap_stamped_by_the_connection_is_written_before_its_message()
     {
-        var harness = new RecorderHarness();
+        using var harness = new RecorderHarness();
         var message = harness.Buffer(10, "after the gap", s_t0);
         message.GapFirstSeq = 5;
         message.GapLastSeq = 9;
@@ -110,7 +110,7 @@ public class RecorderTests
     [Fact]
     public void Write_error_is_retried_after_a_delay_and_the_missed_messages_become_a_gap()
     {
-        var harness = new RecorderHarness();
+        using var harness = new RecorderHarness();
         // A file where the recordings folder should be: nothing can be written until it is gone.
         File.WriteAllText(harness.RecordingsFolder, "");
 
@@ -138,7 +138,7 @@ public class RecorderTests
     [Fact]
     public async Task Quiet_period_still_flushes_on_the_write_interval()
     {
-        var harness = new RecorderHarness(s => s with { WriteInterval = TimeSpan.FromSeconds(2) });
+        using var harness = new RecorderHarness(s => s with { WriteInterval = TimeSpan.FromSeconds(2) });
         harness.Start();
         harness.Send(harness.Buffer(1, "only message", s_t0));
         await RecorderHarness.WaitUntilAsync(() => harness.Recorder.ActiveFile is not null);

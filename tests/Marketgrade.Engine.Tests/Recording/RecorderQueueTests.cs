@@ -38,7 +38,8 @@ public class RecorderQueueTests
         var events = new ConnectionEventLog(100);
         var connection = new ExchangeConnection(
             new TestAdapter(server.Uri), pool, [stats.Writer], s_options, events, metrics, recorder: recorderQueue.Writer);
-        var folder = TestRecordings.CreateFolder();
+        using var tempFolder = new TempFolder();
+        var folder = tempFolder.Path;
         var manager = new RecordingManager(RecordingSettings.Default(folder), s_options, TimeProvider.System, events, NullLogger.Instance);
         var recorder = manager.AddRecorder(connection.Adapter);
         connection.Start();

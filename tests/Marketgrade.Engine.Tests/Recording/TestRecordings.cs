@@ -7,13 +7,6 @@ internal sealed record TestRecord(RecordType Type, long Seq, long ArrivalUnixNs,
 /// <summary>Writes and reads recording files for tests.</summary>
 internal static class TestRecordings
 {
-    public static string CreateFolder()
-    {
-        var folder = Path.Combine(Path.GetTempPath(), "marketgrade-tests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(folder);
-        return folder;
-    }
-
     public static byte[] Build(IEnumerable<TestRecord> records, int exchangeId = 7, string exchange = "Test", long createdUnixNs = 1)
     {
         using var output = new MemoryStream();

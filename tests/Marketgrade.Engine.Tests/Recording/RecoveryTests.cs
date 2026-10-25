@@ -10,7 +10,8 @@ public class RecoveryTests
     [Fact]
     public void Half_written_last_record_is_cut_off()
     {
-        var folder = TestRecordings.CreateFolder();
+        using var tempFolder = new TempFolder();
+        var folder = tempFolder.Path;
         var path = RecordingFiles.PathFor(folder, "Test", s_hour);
         TestRecordings.Write(path, [TestRecordings.Message(1, "first"), TestRecordings.Message(2, "second")]);
         var validLength = new FileInfo(path).Length;
@@ -33,7 +34,8 @@ public class RecoveryTests
     [Fact]
     public void Corrupted_record_and_everything_after_it_is_cut_off()
     {
-        var folder = TestRecordings.CreateFolder();
+        using var tempFolder = new TempFolder();
+        var folder = tempFolder.Path;
         var path = RecordingFiles.PathFor(folder, "Test", s_hour);
         var bytes = TestRecordings.Build([TestRecordings.Message(1, "first"), TestRecordings.Message(2, "second"), TestRecordings.Message(3, "third")]);
         var secondPayload = bytes.Length - 2 * RecordFormat.RecordHeaderSize - "second".Length - "third".Length;
@@ -49,7 +51,8 @@ public class RecoveryTests
     [Fact]
     public void Intact_files_and_compressed_files_are_left_unchanged()
     {
-        var folder = TestRecordings.CreateFolder();
+        using var tempFolder = new TempFolder();
+        var folder = tempFolder.Path;
         var path = RecordingFiles.PathFor(folder, "Test", s_hour);
         var compressed = RecordingFiles.PathFor(folder, "Test", s_hour - 1, compressed: true);
         TestRecordings.Write(path, [TestRecordings.Message(1, "first")]);
@@ -66,7 +69,8 @@ public class RecoveryTests
     [Fact]
     public void File_without_a_complete_header_is_deleted_and_leftover_temp_files_are_removed()
     {
-        var folder = TestRecordings.CreateFolder();
+        using var tempFolder = new TempFolder();
+        var folder = tempFolder.Path;
         var empty = RecordingFiles.PathFor(folder, "Test", s_hour);
         var temp = RecordingFiles.PathFor(folder, "Test", s_hour - 1, compressed: true) + ".tmp";
         var foreign = Path.Combine(Path.GetDirectoryName(empty)!, "notes.mgrec.zst.tmp");
