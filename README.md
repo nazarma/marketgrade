@@ -6,7 +6,8 @@ large order) and market maker performance against agreed targets. The first rele
 Kraken, Coinbase and Binance.
 
 **Status: early development.** The engine connects to Kraken, Coinbase and Binance, reconnects when a
-connection dies, and the desktop window shows each exchange's state and messages per second.
+connection dies, and records every message to compressed hourly files. The desktop window shows each
+exchange's state and messages per second, and the Settings screen controls recording.
 
 ## Prerequisites
 
@@ -50,7 +51,18 @@ dotnet run --project tools/Marketgrade.Probe -- --seconds 60 --interval 5
 ```
 
 `--capture <dir>` saves real sample messages of each kind instead; the test fixtures in
-`tests/Marketgrade.Engine.Tests/Fixtures` were captured this way.
+`tests/Marketgrade.Engine.Tests/Fixtures` were captured this way. `--record <dir>` records everything
+with the default recording settings.
+
+Recordings are in the app data folder (`~/Library/Application Support/io.github.nazarma.marketgrade/recordings`
+on macOS) unless changed in Settings. The reader tool prints, checks and summarizes them (format:
+[docs/recording-format.md](docs/recording-format.md)):
+
+```sh
+dotnet run --project tools/Marketgrade.Reader -- cat <file> --limit 20 --payload
+dotnet run --project tools/Marketgrade.Reader -- verify <folder>
+dotnet run --project tools/Marketgrade.Reader -- stats <folder>
+```
 
 Engine metrics while the app runs (install once with `dotnet tool install -g dotnet-counters`):
 
@@ -80,8 +92,9 @@ pnpm tauri build --no-bundle --config src/desktop/tauri.release.conf.json
 | `src/desktop`                | Tauri 2 desktop shell                            |
 | `tests`                      | xUnit tests                                      |
 | `benchmarks`                 | BenchmarkDotNet benchmarks                       |
-| `tools`                      | Probe tool for live exchange connections         |
+| `tools`                      | Probe tool and recording reader                  |
 | `docs/architecture.md`       | Architecture decisions                           |
+| `docs/recording-format.md`   | Recording file format                            |
 
 ## License
 
