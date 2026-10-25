@@ -8,6 +8,8 @@ namespace Marketgrade.Engine.Recording;
 /// </summary>
 public sealed class RecordingReader : IDisposable
 {
+    public const string IncompleteFileHeader = "Incomplete file header";
+
     private readonly Stream _stream;
     private readonly byte[] _header = new byte[RecordFormat.RecordHeaderSize];
     private byte[] _payload = new byte[64 * 1024];
@@ -26,9 +28,10 @@ public sealed class RecordingReader : IDisposable
         var length = RecordFormat.TryReadFileHeader(start.AsSpan(0, read), out var header);
         if (length <= 0)
         {
-            Error = length == 0 ? "Incomplete file header" : "Not a recording file";
+            Error = length == 0 ? IncompleteFileHeader : "Not a recording file";
             return;
         }
+        HasHeader = true;
         Header = header;
         ValidLength = length;
     }
@@ -43,6 +46,8 @@ public sealed class RecordingReader : IDisposable
         }
         return new RecordingReader(stream);
     }
+
+    public bool HasHeader { get; }
 
     public FileHeader Header { get; }
 
