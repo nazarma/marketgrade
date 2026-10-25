@@ -3,13 +3,17 @@ using System.Net.WebSockets;
 using System.Threading.Channels;
 using BenchmarkDotNet.Attributes;
 using Marketgrade.Engine;
+using Marketgrade.Engine.Recording;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Marketgrade.Benchmarks;
 
 /// <summary>
 /// The whole per-message path: WebSocket receive, stamping, queueing, classifying and releasing.
-/// Real messages are replayed as WebSocket frames from memory, so only engine code is measured.
-/// Allocations are reported per message; the WebSocket created per run is spread over all of them.
+/// With <see cref="Recording"/> the recorder is the second consumer and writes every message to disk
+/// (or drops it for the recorder when it falls behind). Real messages are replayed as WebSocket frames
+/// from memory, so only engine code is measured. Allocations are reported per message, on all threads;
+/// the WebSocket created per run is spread over all of them.
 /// </summary>
 [MemoryDiagnoser]
 public class HotPathBenchmarks
@@ -22,10 +26,18 @@ public class HotPathBenchmarks
     private Channel<MessageBuffer> _queue = null!;
     private EngineMetrics _metrics = null!;
     private Task _consumerTask = null!;
+    private Channel<MessageBuffer>? _recorderQueue;
+    private RecordingManager? _recording;
+    private Task? _recorderTask;
+    private string _folder = "";
+    private int _iteration;
     private long _expected;
 
     [Params("kraken", "coinbase", "binance")]
     public string Exchange { get; set; } = "";
+
+    [Params(false, true)]
+    public bool Recording { get; set; }
 
     [GlobalSetup]
     public void Setup()
@@ -43,7 +55,7 @@ public class HotPathBenchmarks
         // The replayed frames arrive far faster than any exchange sends, so the queue fills up. A pool that
         // covers the whole queue keeps pool misses (counted by the pool_misses metric) out of the measurement.
         var defaults = new EngineOptions();
-        var options = defaults with { PoolSize = defaults.QueueCapacity + 16 };
+        var options = defaults with { PoolSize = defaults.QueueCapacity + defaults.RecorderQueueCapacity + 16 };
         var pool = new MessageBufferPool(options.PoolSize, options.BufferSize);
         _metrics = new EngineMetrics();
         _queue = Channel.CreateBounded<MessageBuffer>(new BoundedChannelOptions(options.QueueCapacity)
@@ -52,9 +64,38 @@ public class HotPathBenchmarks
             SingleWriter = true,
             FullMode = BoundedChannelFullMode.Wait,
         });
-        _connection = new ExchangeConnection(adapter, pool, [_queue.Writer], options, new ConnectionEventLog(200), _metrics);
+        var events = new ConnectionEventLog(200);
+        if (Recording)
+        {
+            _folder = Path.Combine(Path.GetTempPath(), "marketgrade-benchmarks", Guid.NewGuid().ToString("N"));
+            _recording = new RecordingManager(RecordingSettings.Default(FolderFor(0)), options, TimeProvider.System, events, NullLogger.Instance, _metrics);
+            _recorderQueue = Channel.CreateBounded<MessageBuffer>(new BoundedChannelOptions(options.RecorderQueueCapacity)
+            {
+                SingleReader = true,
+                SingleWriter = true,
+            });
+            var recorder = _recording.AddRecorder(adapter);
+            _recorderTask = Task.Run(() => recorder.RunAsync(_recorderQueue.Reader));
+        }
+        _connection = new ExchangeConnection(adapter, pool, [_queue.Writer], options, events, _metrics, recorder: _recorderQueue?.Writer);
         _consumer = new StatsConsumer(adapter);
         _consumerTask = Task.Run(() => _consumer.RunAsync(_queue.Reader));
+    }
+
+    /// <summary>Moves the recorder to a new folder and deletes the one before, so the benchmark does not fill the disk.</summary>
+    [IterationCleanup]
+    public void IterationCleanup()
+    {
+        if (_recording is null)
+        {
+            return;
+        }
+        _iteration++;
+        _recording.Apply(_recording.Settings with { Folder = FolderFor(_iteration) });
+        if (_iteration >= 2 && Directory.Exists(FolderFor(_iteration - 2)))
+        {
+            Directory.Delete(FolderFor(_iteration - 2), recursive: true);
+        }
     }
 
     [GlobalCleanup]
@@ -62,8 +103,16 @@ public class HotPathBenchmarks
     {
         _queue.Writer.Complete();
         _consumerTask.Wait();
+        _recorderQueue?.Writer.Complete();
+        _recorderTask?.Wait();
+        if (Recording && Directory.Exists(_folder))
+        {
+            Directory.Delete(_folder, recursive: true);
+        }
         _metrics.Dispose();
     }
+
+    private string FolderFor(int iteration) => Path.Combine(_folder, iteration.ToString(System.Globalization.CultureInfo.InvariantCulture));
 
     [Benchmark(OperationsPerInvoke = MessageCount)]
     public async Task ReceiveQueueClassifyRelease()
