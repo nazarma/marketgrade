@@ -1,14 +1,16 @@
 using Marketgrade.Engine;
 using Marketgrade.Engine.Exchanges;
+using Marketgrade.Engine.Recording;
 using Marketgrade.Probe;
 using Microsoft.Extensions.Logging;
 
 // Runs the engine against the real exchanges and prints what it receives.
-//   dotnet run --project tools/Marketgrade.Probe -- [--seconds 60] [--interval 5]
+//   dotnet run --project tools/Marketgrade.Probe -- [--seconds 60] [--interval 5] [--record <dir>]
 //   dotnet run --project tools/Marketgrade.Probe -- --capture <dir> [--seconds 15]
 int? secondsArgument = null;
 var interval = 5;
 string? captureDirectory = null;
+string? recordDirectory = null;
 for (var i = 0; i < args.Length; i++)
 {
     switch (args[i])
@@ -21,6 +23,9 @@ for (var i = 0; i < args.Length; i++)
             break;
         case "--capture":
             captureDirectory = args[++i];
+            break;
+        case "--record":
+            recordDirectory = Path.GetFullPath(args[++i]);
             break;
         default:
             Console.Error.WriteLine($"Unknown argument: {args[i]}");
@@ -40,9 +45,15 @@ var seconds = secondsArgument ?? 60;
 using var loggerFactory = LoggerFactory.Create(builder => builder
     .AddSimpleConsole(options => options.TimestampFormat = "HH:mm:ss ")
     .SetMinimumLevel(LogLevel.Warning));
-await using var engine = new MarketEngine(new EngineOptions(), adapters, loggerFactory.CreateLogger("Engine"));
+// Records with the default settings, so the files match what the app writes.
+await using var engine = new MarketEngine(new EngineOptions(), adapters, loggerFactory.CreateLogger("Engine"),
+    recordDirectory is null ? null : RecordingSettings.Default(recordDirectory));
 
 Console.WriteLine($"Probing {string.Join(", ", adapters.Select(a => $"{a.Name} {a.Pair}"))} for {seconds} s");
+if (recordDirectory is not null)
+{
+    Console.WriteLine($"Recording to {recordDirectory}");
+}
 engine.Start();
 var started = DateTime.UtcNow;
 var printed = 0;
@@ -67,4 +78,9 @@ Console.WriteLine();
 Console.WriteLine($"Summary after {seconds} s");
 StatusTable.PrintSummary(running, seconds);
 Console.WriteLine($"Buffer pool: {engine.Pool.Available} of {engine.Pool.Created} free, {engine.Pool.Misses} misses");
+if (running.Recording is { } recording)
+{
+    Console.WriteLine($"Recording: {recording.State}, {RecordingFiles.TotalBytes(recordDirectory!) / 1024.0 / 1024.0:0.00} MB on disk, " +
+        $"{recording.DroppedMessages} dropped{(recording.LastError is null ? "" : $", last error: {recording.LastError}")}");
+}
 return 0;
