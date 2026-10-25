@@ -21,7 +21,7 @@ internal sealed class RecorderHarness
         Time = new FakeTimeProvider(now ?? new DateTimeOffset(2026, 3, 29, 10, 30, 0, TimeSpan.Zero));
         var settings = RecordingSettings.Default(Path.Combine(Folder, "recordings"));
         Manager = new RecordingManager(configure?.Invoke(settings) ?? settings, options ?? new EngineOptions(), Time, Events, NullLogger.Instance);
-        Recorder = new Recorder(Adapter, Manager);
+        Recorder = Manager.AddRecorder(Adapter);
     }
 
     public string Folder { get; }

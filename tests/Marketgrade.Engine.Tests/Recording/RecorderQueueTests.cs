@@ -40,7 +40,7 @@ public class RecorderQueueTests
             new TestAdapter(server.Uri), pool, [stats.Writer], s_options, events, metrics, recorder: recorderQueue.Writer);
         var folder = TestRecordings.CreateFolder();
         var manager = new RecordingManager(RecordingSettings.Default(folder), s_options, TimeProvider.System, events, NullLogger.Instance);
-        var recorder = new Recorder(connection.Adapter, manager);
+        var recorder = manager.AddRecorder(connection.Adapter);
         connection.Start();
 
         var received = new List<string>();

@@ -66,7 +66,7 @@ public class RecorderTests
         harness.Write(harness.Buffer(1, "first", s_t0));
         harness.Close();
 
-        var second = new Recorder(harness.Adapter, harness.Manager);
+        var second = harness.Manager.AddRecorder(harness.Adapter);
         second.BeginBatch();
         second.Process(harness.Buffer(2, "second", s_t0.AddMinutes(1)));
         second.CloseFile();

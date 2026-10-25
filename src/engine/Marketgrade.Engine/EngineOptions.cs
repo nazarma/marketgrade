@@ -42,6 +42,15 @@ public sealed record EngineOptions
 
     public int EventLogSize { get; init; } = 200;
 
+    /// <summary>How often the recording worker compresses finished hours and checks the disk.</summary>
+    public TimeSpan RecordingCheckInterval { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>How often old recordings are deleted and missed hours are compressed.</summary>
+    public TimeSpan RetentionInterval { get; init; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>An uncompressed file left behind (recording turned off, app restarted) is compressed this long after its hour ends.</summary>
+    public TimeSpan FinishedHourGrace { get; init; } = TimeSpan.FromMinutes(5);
+
     /// <summary>After a write error, a recorder tries again after this delay.</summary>
     public TimeSpan RecordingRetryDelay { get; init; } = TimeSpan.FromSeconds(5);
 }

@@ -17,6 +17,7 @@ public sealed class EngineMetrics : IDisposable
         PoolMisses = _meter.CreateCounter<long>("pool_misses", description: "Buffers created because the pool was empty");
         RecordingBytesWritten = _meter.CreateCounter<long>("recording_bytes_written", "By", "Bytes written to recording files");
         RecordingDropped = _meter.CreateCounter<long>("recording_dropped", description: "Records dropped because the recorder queue was full");
+        RecordingFilesCompressed = _meter.CreateCounter<long>("recording_files_compressed", description: "Finished hours compressed");
     }
 
     public Counter<long> MessagesReceived { get; }
@@ -30,6 +31,8 @@ public sealed class EngineMetrics : IDisposable
     public Counter<long> RecordingBytesWritten { get; }
 
     public Counter<long> RecordingDropped { get; }
+
+    public Counter<long> RecordingFilesCompressed { get; }
 
     public void ObserveEngine(Func<IEnumerable<Measurement<long>>> queueLengths, Func<IEnumerable<Measurement<int>>> connectionStates)
     {

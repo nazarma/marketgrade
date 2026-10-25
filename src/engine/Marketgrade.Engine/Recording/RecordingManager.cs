@@ -6,6 +6,7 @@ namespace Marketgrade.Engine.Recording;
 /// <summary>What all recorders share: the current settings, the low-disk pause and the compression queue.</summary>
 internal sealed class RecordingManager
 {
+    private readonly List<Recorder> _recorders = [];
     private RecordingSettings _settings;
     private int _paused;
 
@@ -46,6 +47,23 @@ internal sealed class RecordingManager
 
     /// <summary>Closed files of finished hours, waiting for compression.</summary>
     public Channel<string> CompressionQueue { get; } = Channel.CreateUnbounded<string>();
+
+    public IReadOnlyList<Recorder> Recorders => _recorders;
+
+    /// <summary>Creates the recorder of one exchange. All recorders are created before the engine starts.</summary>
+    public Recorder AddRecorder(ExchangeAdapter adapter)
+    {
+        var recorder = new Recorder(adapter, this);
+        _recorders.Add(recorder);
+        return recorder;
+    }
+
+    /// <summary>True for a file a recorder is writing; it must not be compressed or deleted.</summary>
+    public bool IsActive(string path) => _recorders.Any(r => r.ActiveFile == path);
+
+    /// <summary>The exchange name as the metrics tag it, from the lower-case folder name.</summary>
+    public string ExchangeName(string folderName) =>
+        _recorders.FirstOrDefault(r => r.Adapter.Name.Equals(folderName, StringComparison.OrdinalIgnoreCase))?.Adapter.Name ?? folderName;
 
     public void Apply(RecordingSettings settings) => Volatile.Write(ref _settings, settings);
 

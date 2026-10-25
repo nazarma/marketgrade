@@ -20,9 +20,11 @@ public sealed class MarketEngine : IAsyncDisposable
     private readonly ConnectionEventLog _events;
     private readonly Feed[] _feeds;
     private readonly RecordingManager? _recording;
+    private readonly RecordingWorker? _worker;
     private readonly CancellationTokenSource _stop = new();
     private EngineStatus _status;
     private Task? _statusLoop;
+    private Task? _workerTask;
     private Task[] _consumerTasks = [];
     private int _started;
     private Task? _stopped;
@@ -43,6 +45,7 @@ public sealed class MarketEngine : IAsyncDisposable
         if (recording is not null)
         {
             _recording = new RecordingManager(recording, options, timeProvider ?? TimeProvider.System, _events, _logger, _metrics);
+            _worker = new RecordingWorker(_recording);
         }
 
         _feeds = [.. adapters.Select(adapter =>
@@ -52,7 +55,7 @@ public sealed class MarketEngine : IAsyncDisposable
             var connection = new ExchangeConnection(
                 adapter, Pool, [stats.Channel.Writer], options, _events, _metrics, _logger, recorder?.Channel.Writer);
             return new Feed(adapter, connection, new StatsConsumer(adapter), stats,
-                _recording is null ? null : new Recorder(adapter, _recording), recorder);
+                _recording?.AddRecorder(adapter), recorder);
         })];
 
         _metrics.ObserveEngine(ObserveQueueLengths, ObserveConnectionStates);
@@ -93,6 +96,10 @@ public sealed class MarketEngine : IAsyncDisposable
             feed.Connection.Start();
         }
         _statusLoop = Task.Run(StatusLoopAsync);
+        if (_worker is not null)
+        {
+            _workerTask = Task.Run(() => _worker.RunAsync(_stop.Token));
+        }
     }
 
     /// <summary>Stops all connections, lets the consumers drain their queues, and publishes a final status.</summary>
@@ -116,6 +123,10 @@ public sealed class MarketEngine : IAsyncDisposable
         if (_statusLoop is not null)
         {
             await _statusLoop;
+        }
+        if (_workerTask is not null)
+        {
+            await _workerTask;
         }
         await Task.WhenAll(_feeds.Select(feed => feed.Connection.StopAsync()));
         foreach (var queue in _feeds.SelectMany(feed => feed.Queues))
