@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/" />
+  <Folder Name="/src/engine/">
+    <Project Path="src/engine/Marketgrade.Engine/Marketgrade.Engine.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Marketgrade.Engine.Tests/Marketgrade.Engine.Tests.csproj" />
+  </Folder>
+</Solution>
