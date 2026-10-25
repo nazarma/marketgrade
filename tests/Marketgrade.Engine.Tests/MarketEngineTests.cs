@@ -1,3 +1,6 @@
+using Marketgrade.Engine.Recording;
+using Marketgrade.Engine.Tests.Recording;
+
 namespace Marketgrade.Engine.Tests;
 
 public class MarketEngineTests
@@ -36,6 +39,32 @@ public class MarketEngineTests
 
         Assert.Equal(engine.Pool.Created, engine.Pool.Available);
         Assert.All(engine.Status.Exchanges, e => Assert.Equal(ConnectionState.Stopped, e.State));
+        await engine.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Recording_engine_writes_every_message_and_returns_every_buffer()
+    {
+        await using var server = await FakeExchangeServer.StartAsync(async c =>
+        {
+            for (var i = 1; i <= 500; i++)
+            {
+                await c.SendAsync($"{{\"n\":{i}}}");
+            }
+            await c.Closed;
+        });
+        var folder = TestRecordings.CreateFolder();
+        var engine = new MarketEngine(s_fast, [new TestAdapter(server.Uri, "A")], recording: RecordingSettings.Default(folder));
+        engine.Start();
+        await WaitUntilAsync(() => engine.Status.Exchanges[0].DataMessages == 500);
+
+        await engine.StopAsync();
+
+        var records = RecordingFiles.Enumerate(folder).OrderBy(f => f.Hour).SelectMany(f => TestRecordings.Read(f.Path)).ToList();
+        Assert.Equal(Enumerable.Range(1, 500).Select(i => (long)i), records.Where(r => r.Type == RecordType.Message).Select(r => r.Seq));
+        Assert.Equal(RecordType.ConnectionOpened, records[0].Type);
+        Assert.Equal(RecordType.ConnectionClosed, records[^1].Type);
+        Assert.Equal(engine.Pool.Created, engine.Pool.Available);
         await engine.DisposeAsync();
     }
 

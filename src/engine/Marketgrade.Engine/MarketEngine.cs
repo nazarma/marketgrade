@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Threading.Channels;
+using Marketgrade.Engine.Recording;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -8,7 +9,8 @@ namespace Marketgrade.Engine;
 
 /// <summary>
 /// Runs one connection per exchange and its consumers, and publishes an <see cref="EngineStatus"/>
-/// once per status interval. Each consumer has its own bounded queue per exchange.
+/// once per status interval. Each consumer has its own bounded queue per exchange: the stats consumer
+/// and, when recording is configured, the recorder.
 /// </summary>
 public sealed class MarketEngine : IAsyncDisposable
 {
@@ -17,6 +19,7 @@ public sealed class MarketEngine : IAsyncDisposable
     private readonly EngineMetrics _metrics = new();
     private readonly ConnectionEventLog _events;
     private readonly Feed[] _feeds;
+    private readonly RecordingManager? _recording;
     private readonly CancellationTokenSource _stop = new();
     private EngineStatus _status;
     private Task? _statusLoop;
@@ -24,25 +27,32 @@ public sealed class MarketEngine : IAsyncDisposable
     private int _started;
     private Task? _stopped;
 
-    public MarketEngine(EngineOptions options, IReadOnlyList<ExchangeAdapter> adapters, ILogger? logger = null)
+    /// <param name="recording">Recording settings; null runs the engine without recorders.</param>
+    /// <param name="timeProvider">The recorders' clock; tests use a fake one.</param>
+    public MarketEngine(
+        EngineOptions options,
+        IReadOnlyList<ExchangeAdapter> adapters,
+        ILogger? logger = null,
+        RecordingSettings? recording = null,
+        TimeProvider? timeProvider = null)
     {
         _options = options;
         _logger = logger ?? NullLogger.Instance;
         _events = new ConnectionEventLog(options.EventLogSize);
         Pool = new MessageBufferPool(options.PoolSize, options.BufferSize, _logger, _metrics);
-
-        var queueOptions = new BoundedChannelOptions(options.QueueCapacity)
+        if (recording is not null)
         {
-            SingleReader = true,
-            SingleWriter = true,
-            FullMode = BoundedChannelFullMode.Wait,
-        };
+            _recording = new RecordingManager(recording, options, timeProvider ?? TimeProvider.System, _events, _logger, _metrics);
+        }
+
         _feeds = [.. adapters.Select(adapter =>
         {
-            // Step 3 adds the recorder here as a second queue and consumer.
-            var stats = new Queue("stats", Channel.CreateBounded<MessageBuffer>(queueOptions));
-            var connection = new ExchangeConnection(adapter, Pool, [stats.Channel.Writer], options, _events, _metrics, _logger);
-            return new Feed(adapter, connection, new StatsConsumer(adapter), stats);
+            var stats = new Queue("stats", options.QueueCapacity);
+            var recorder = _recording is null ? null : new Queue("recorder", options.RecorderQueueCapacity);
+            var connection = new ExchangeConnection(
+                adapter, Pool, [stats.Channel.Writer], options, _events, _metrics, _logger, recorder?.Channel.Writer);
+            return new Feed(adapter, connection, new StatsConsumer(adapter), stats,
+                _recording is null ? null : new Recorder(adapter, _recording), recorder);
         })];
 
         _metrics.ObserveEngine(ObserveQueueLengths, ObserveConnectionStates);
@@ -56,13 +66,28 @@ public sealed class MarketEngine : IAsyncDisposable
 
     public IReadOnlyList<ConnectionEvent> GetRecentEvents(int count) => _events.GetRecent(count);
 
+    /// <summary>Recorders pick up the new settings between batches; nothing restarts.</summary>
+    public void ApplyRecordingSettings(RecordingSettings settings)
+    {
+        if (_recording is null)
+        {
+            throw new InvalidOperationException("The engine was created without recording");
+        }
+        _recording.Apply(settings);
+    }
+
     public void Start()
     {
         if (Interlocked.Exchange(ref _started, 1) == 1)
         {
             return;
         }
-        _consumerTasks = [.. _feeds.Select(feed => Task.Run(() => feed.Stats.RunAsync(feed.StatsQueue.Channel.Reader)))];
+        _consumerTasks =
+        [
+            .. _feeds.Select(feed => Task.Run(() => feed.Stats.RunAsync(feed.StatsQueue.Channel.Reader))),
+            .. _feeds.Where(feed => feed.Recorder is not null)
+                .Select(feed => Task.Run(() => feed.Recorder!.RunAsync(feed.RecorderQueue!.Channel.Reader))),
+        ];
         foreach (var feed in _feeds)
         {
             feed.Connection.Start();
@@ -93,9 +118,9 @@ public sealed class MarketEngine : IAsyncDisposable
             await _statusLoop;
         }
         await Task.WhenAll(_feeds.Select(feed => feed.Connection.StopAsync()));
-        foreach (var feed in _feeds)
+        foreach (var queue in _feeds.SelectMany(feed => feed.Queues))
         {
-            feed.StatsQueue.Channel.Writer.TryComplete();
+            queue.Channel.Writer.TryComplete();
         }
         await Task.WhenAll(_consumerTasks);
         Volatile.Write(ref _status, BuildStatus(elapsedSeconds: 0));
@@ -156,37 +181,53 @@ public sealed class MarketEngine : IAsyncDisposable
     {
         foreach (var feed in _feeds)
         {
-            var queue = feed.StatsQueue;
-            var length = queue.Channel.Reader.Count;
-            if (length > _options.QueueCapacity * 0.8 && LogThrottle.ShouldLog(ref queue.LastWarning))
+            foreach (var queue in feed.Queues)
             {
-                _logger.LogWarning(
-                    "{Exchange}: {Consumer} queue is {Length} of {Capacity} full",
-                    feed.Adapter.Name, queue.Name, length, _options.QueueCapacity);
+                var length = queue.Channel.Reader.Count;
+                if (length > queue.Capacity * 0.8 && LogThrottle.ShouldLog(ref queue.LastWarning))
+                {
+                    _logger.LogWarning(
+                        "{Exchange}: {Consumer} queue is {Length} of {Capacity} full",
+                        feed.Adapter.Name, queue.Name, length, queue.Capacity);
+                }
             }
         }
     }
 
     private IEnumerable<Measurement<long>> ObserveQueueLengths() =>
-        _feeds.Select(feed => new Measurement<long>(
-            feed.StatsQueue.Channel.Reader.Count,
-            new TagList { { "exchange", feed.Adapter.Name }, { "consumer", feed.StatsQueue.Name } }));
+        _feeds.SelectMany(feed => feed.Queues.Select(queue => new Measurement<long>(
+            queue.Channel.Reader.Count,
+            new TagList { { "exchange", feed.Adapter.Name }, { "consumer", queue.Name } })));
 
     private IEnumerable<Measurement<int>> ObserveConnectionStates() =>
         _feeds.Select(feed => new Measurement<int>(
             (int)feed.Connection.State,
             new TagList { { "exchange", feed.Adapter.Name } }));
 
-    private sealed class Queue(string name, Channel<MessageBuffer> channel)
+    private sealed class Queue(string name, int capacity)
     {
         public long LastWarning = LogThrottle.Never;
 
         public string Name { get; } = name;
 
-        public Channel<MessageBuffer> Channel { get; } = channel;
+        public int Capacity { get; } = capacity;
+
+        public Channel<MessageBuffer> Channel { get; } = System.Threading.Channels.Channel.CreateBounded<MessageBuffer>(
+            new BoundedChannelOptions(capacity)
+            {
+                SingleReader = true,
+                SingleWriter = true,
+                FullMode = BoundedChannelFullMode.Wait,
+            });
     }
 
-    private sealed class Feed(ExchangeAdapter adapter, ExchangeConnection connection, StatsConsumer stats, Queue statsQueue)
+    private sealed class Feed(
+        ExchangeAdapter adapter,
+        ExchangeConnection connection,
+        StatsConsumer stats,
+        Queue statsQueue,
+        Recorder? recorder,
+        Queue? recorderQueue)
     {
         public ExchangeAdapter Adapter { get; } = adapter;
 
@@ -195,6 +236,13 @@ public sealed class MarketEngine : IAsyncDisposable
         public StatsConsumer Stats { get; } = stats;
 
         public Queue StatsQueue { get; } = statsQueue;
+
+        public Recorder? Recorder { get; } = recorder;
+
+        /// <summary>The connection only ever uses TryWrite on this queue, so its full mode never applies.</summary>
+        public Queue? RecorderQueue { get; } = recorderQueue;
+
+        public IEnumerable<Queue> Queues => RecorderQueue is null ? [StatsQueue] : [StatsQueue, RecorderQueue];
 
         public long LastDataMessages { get; set; }
 

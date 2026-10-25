@@ -2,7 +2,9 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Net;
 using System.Net.WebSockets;
+using System.Text;
 using System.Threading.Channels;
+using Marketgrade.Engine.Recording;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -11,12 +13,15 @@ namespace Marketgrade.Engine;
 /// <summary>
 /// Keeps one WebSocket connection to an exchange alive: connects, subscribes, receives every
 /// message into a pooled buffer, hands it to each consumer queue, and reconnects when needed.
+/// The connection waits for a full consumer queue, except the recorder's: what does not fit there
+/// is dropped for the recorder only, so recording never slows live monitoring.
 /// </summary>
 public sealed class ExchangeConnection
 {
     private readonly ExchangeAdapter _adapter;
     private readonly MessageBufferPool _pool;
     private readonly ChannelWriter<MessageBuffer>[] _writers;
+    private readonly ChannelWriter<MessageBuffer>? _recorder;
     private readonly EngineOptions _options;
     private readonly ConnectionEventLog _events;
     private readonly EngineMetrics? _metrics;
@@ -29,6 +34,10 @@ public sealed class ExchangeConnection
     private long _seq;
     private long _lastMessageTimestamp;
     private int _reconnectCount;
+    private long _recordingDropped;
+
+    /// <summary>Messages dropped for the recorder since the last record it got; stamped onto the next one.</summary>
+    private SeqRange _gap;
     private string? _lastError;
     private ClientWebSocket? _socket;
     private bool _deadBySilence;
@@ -41,11 +50,13 @@ public sealed class ExchangeConnection
         EngineOptions options,
         ConnectionEventLog events,
         EngineMetrics? metrics = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        ChannelWriter<MessageBuffer>? recorder = null)
     {
         _adapter = adapter;
         _pool = pool;
         _writers = writers;
+        _recorder = recorder;
         _options = options;
         _events = events;
         _metrics = metrics;
@@ -63,6 +74,9 @@ public sealed class ExchangeConnection
     public int ReconnectCount => Volatile.Read(ref _reconnectCount);
 
     public string? LastError => Volatile.Read(ref _lastError);
+
+    /// <summary>Records dropped because the recorder's queue was full.</summary>
+    public long RecordingDropped => Interlocked.Read(ref _recordingDropped);
 
     /// <summary><see cref="Stopwatch"/> timestamp of the last message, or 0 before the first one.</summary>
     public long LastMessageTimestamp => Interlocked.Read(ref _lastMessageTimestamp);
@@ -139,10 +153,16 @@ public sealed class ExchangeConnection
         }
         finally
         {
+            if (!_gap.IsEmpty)
+            {
+                _logger.LogWarning("{Exchange}: messages {First} to {Last} were not recorded ({Count} dropped at stop)",
+                    _adapter.Name, _gap.First, _gap.Last, _gap.Count);
+            }
             foreach (var writer in _writers)
             {
                 writer.TryComplete();
             }
+            _recorder?.TryComplete();
             SetState(ConnectionState.Stopped);
             AddEvent("Stopped");
         }
@@ -192,6 +212,7 @@ public sealed class ExchangeConnection
         Volatile.Write(ref _deadBySilence, false);
         SetState(ConnectionState.Live);
         AddEvent("Connected", $"connection {connectionId}");
+        Record(RecordType.ConnectionOpened, connectionId, _adapter.Uri.AbsoluteUri);
 
         using var watchdogStop = new CancellationTokenSource();
         var watchdog = WatchdogAsync(socket, watchdogStop.Token);
@@ -226,8 +247,9 @@ public sealed class ExchangeConnection
             && _adapter.MaxConnectionLifetime is { } lifetime
             && liveFor >= lifetime - _options.ScheduledCloseTolerance)
         {
-            return new ConnectionEnd(EndKind.Scheduled, "scheduled", $"Closed by server ({Format(lifetime)} limit)", end.Detail, liveFor);
+            end = new ConnectionEnd(EndKind.Scheduled, "scheduled", $"Closed by server ({Format(lifetime)} limit)", end.Detail, liveFor);
         }
+        Record(RecordType.ConnectionClosed, connectionId, end.Detail is null ? end.Event : $"{end.Event}: {end.Detail}");
         return end with { LiveFor = liveFor };
     }
 
@@ -272,12 +294,16 @@ public sealed class ExchangeConnection
                 buffer.ConnectionId = connectionId;
                 buffer.Seq = ++_seq;
                 buffer.ArrivalUnixNs = (DateTime.UtcNow.Ticks - DateTime.UnixEpoch.Ticks) * 100;
-                buffer.Counter = _writers.Length;
+                buffer.Counter = _recorder is null ? _writers.Length : _writers.Length + 1;
                 _metrics?.MessagesReceived.Add(1, _exchangeTag);
                 _metrics?.BytesReceived.Add(received, _exchangeTag);
 
                 var message = buffer;
                 buffer = null;
+                if (_recorder is not null)
+                {
+                    QueueForRecorder(message);
+                }
                 foreach (var writer in _writers)
                 {
                     if (!writer.TryWrite(message))
@@ -295,6 +321,51 @@ public sealed class ExchangeConnection
                 buffer.Release();
             }
         }
+    }
+
+    /// <summary>
+    /// Hands a record to the recorder without ever waiting. If its queue is full, the record is released
+    /// on the recorder's behalf and a dropped message joins the gap, which goes with the next record that fits.
+    /// </summary>
+    private void QueueForRecorder(MessageBuffer buffer)
+    {
+        var seq = buffer.Seq;
+        var isMessage = buffer.Type == RecordType.Message;
+        buffer.GapFirstSeq = _gap.First;
+        buffer.GapLastSeq = _gap.Last;
+        buffer.GapCount = _gap.Count;
+        if (_recorder!.TryWrite(buffer))
+        {
+            _gap.Clear();
+            return;
+        }
+
+        buffer.Release();
+        Interlocked.Increment(ref _recordingDropped);
+        _metrics?.RecordingDropped.Add(1, _exchangeTag);
+        if (isMessage)
+        {
+            _gap.Add(seq);
+        }
+    }
+
+    /// <summary>Sends a connection record to the recorder only; it carries the last message's seq.</summary>
+    private void Record(RecordType type, long connectionId, string text)
+    {
+        if (_recorder is null)
+        {
+            return;
+        }
+        var buffer = _pool.Rent();
+        // At most 3 UTF-8 bytes per UTF-16 char, so the text always fits.
+        buffer.Length = Encoding.UTF8.GetBytes(text.AsSpan(0, Math.Min(text.Length, buffer.Bytes.Length / 3)), buffer.Bytes);
+        buffer.Type = type;
+        buffer.ExchangeId = _adapter.Id;
+        buffer.ConnectionId = connectionId;
+        buffer.Seq = _seq;
+        buffer.ArrivalUnixNs = (DateTime.UtcNow.Ticks - DateTime.UnixEpoch.Ticks) * 100;
+        buffer.Counter = 1;
+        QueueForRecorder(buffer);
     }
 
     private async Task WatchdogAsync(ClientWebSocket socket, CancellationToken token)

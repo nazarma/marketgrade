@@ -27,6 +27,12 @@ public sealed record EngineOptions
 
     public int QueueCapacity { get; init; } = 8_192;
 
+    /// <summary>
+    /// Smaller than <see cref="QueueCapacity"/>: every queued message holds a pool buffer, so a stalled disk
+    /// costs at most about 32 MB per exchange before messages are dropped for the recorder.
+    /// </summary>
+    public int RecorderQueueCapacity { get; init; } = 2_048;
+
     public int PoolSize { get; init; } = 1_024;
 
     public int BufferSize { get; init; } = 16 * 1024;
