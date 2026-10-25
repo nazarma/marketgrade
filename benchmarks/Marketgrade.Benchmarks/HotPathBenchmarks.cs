@@ -1,0 +1,169 @@
+using System.Buffers.Binary;
+using System.Net.WebSockets;
+using System.Threading.Channels;
+using BenchmarkDotNet.Attributes;
+using Marketgrade.Engine;
+
+namespace Marketgrade.Benchmarks;
+
+/// <summary>
+/// The whole per-message path: WebSocket receive, stamping, queueing, classifying and releasing.
+/// Real messages are replayed as WebSocket frames from memory, so only engine code is measured.
+/// Allocations are reported per message; the WebSocket created per run is spread over all of them.
+/// </summary>
+[MemoryDiagnoser]
+public class HotPathBenchmarks
+{
+    private const int MessageCount = 100_000;
+
+    private ReplayStream _stream = null!;
+    private ExchangeConnection _connection = null!;
+    private StatsConsumer _consumer = null!;
+    private Channel<MessageBuffer> _queue = null!;
+    private EngineMetrics _metrics = null!;
+    private Task _consumerTask = null!;
+    private long _expected;
+
+    [Params("kraken", "coinbase", "binance")]
+    public string Exchange { get; set; } = "";
+
+    [GlobalSetup]
+    public void Setup()
+    {
+        string[] files = Exchange switch
+        {
+            "kraken" => ["kraken/data-book-update.json", "kraken/heartbeat.json"],
+            "coinbase" => ["coinbase/data-l2-update.json", "coinbase/heartbeat.json"],
+            _ => ["binance/data-depth-update.json"],
+        };
+        var messages = files.Select(Fixtures.Read).ToArray();
+        _stream = new ReplayStream(BuildFrames(messages));
+
+        var adapter = Fixtures.AdapterFor($"{Exchange}/");
+        // The replayed frames arrive far faster than any exchange sends, so the queue fills up. A pool that
+        // covers the whole queue keeps pool misses (counted by the pool_misses metric) out of the measurement.
+        var defaults = new EngineOptions();
+        var options = defaults with { PoolSize = defaults.QueueCapacity + 16 };
+        var pool = new MessageBufferPool(options.PoolSize, options.BufferSize);
+        _metrics = new EngineMetrics();
+        _queue = Channel.CreateBounded<MessageBuffer>(new BoundedChannelOptions(options.QueueCapacity)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+        _connection = new ExchangeConnection(adapter, pool, [_queue.Writer], options, new ConnectionEventLog(200), _metrics);
+        _consumer = new StatsConsumer(adapter);
+        _consumerTask = Task.Run(() => _consumer.RunAsync(_queue.Reader));
+    }
+
+    [GlobalCleanup]
+    public void Cleanup()
+    {
+        _queue.Writer.Complete();
+        _consumerTask.Wait();
+        _metrics.Dispose();
+    }
+
+    [Benchmark(OperationsPerInvoke = MessageCount)]
+    public async Task ReceiveQueueClassifyRelease()
+    {
+        _stream.Rewind();
+        using var socket = WebSocket.CreateFromStream(_stream, new WebSocketCreationOptions());
+        await _connection.ReceiveLoopAsync(socket, connectionId: 1);
+
+        _expected += MessageCount;
+        var spin = new SpinWait();
+        while (Total() < _expected)
+        {
+            spin.SpinOnce();
+        }
+    }
+
+    private long Total() =>
+        _consumer.DataMessages + _consumer.HeartbeatMessages + _consumer.ControlMessages + _consumer.ErrorMessages;
+
+    /// <summary>Server-to-client text frames (unmasked), cycling through the messages, then a close frame.</summary>
+    private static byte[] BuildFrames(byte[][] messages)
+    {
+        using var output = new MemoryStream();
+        Span<byte> header = stackalloc byte[10];
+        for (var i = 0; i < MessageCount; i++)
+        {
+            var payload = messages[i % messages.Length];
+            header[0] = 0x81;
+            int headerLength;
+            if (payload.Length < 126)
+            {
+                header[1] = (byte)payload.Length;
+                headerLength = 2;
+            }
+            else if (payload.Length <= ushort.MaxValue)
+            {
+                header[1] = 126;
+                BinaryPrimitives.WriteUInt16BigEndian(header[2..], (ushort)payload.Length);
+                headerLength = 4;
+            }
+            else
+            {
+                header[1] = 127;
+                BinaryPrimitives.WriteUInt64BigEndian(header[2..], (ulong)payload.Length);
+                headerLength = 10;
+            }
+            output.Write(header[..headerLength]);
+            output.Write(payload);
+        }
+        output.Write([0x88, 0x02, 0x03, 0xE8]);
+        return output.ToArray();
+    }
+
+    /// <summary>Plays back the same bytes on every run and discards everything written.</summary>
+    private sealed class ReplayStream(byte[] data) : Stream
+    {
+        private int _position;
+
+        public override bool CanRead => true;
+
+        public override bool CanWrite => true;
+
+        public override bool CanSeek => false;
+
+        public override long Length => throw new NotSupportedException();
+
+        public override long Position
+        {
+            get => throw new NotSupportedException();
+            set => throw new NotSupportedException();
+        }
+
+        public void Rewind() => _position = 0;
+
+        public override int Read(Span<byte> buffer)
+        {
+            var count = Math.Min(buffer.Length, data.Length - _position);
+            data.AsSpan(_position, count).CopyTo(buffer);
+            _position += count;
+            return count;
+        }
+
+        public override int Read(byte[] buffer, int offset, int count) => Read(buffer.AsSpan(offset, count));
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            new(Read(buffer.Span));
+
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+        }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+
+        public override void Flush()
+        {
+        }
+
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+}
