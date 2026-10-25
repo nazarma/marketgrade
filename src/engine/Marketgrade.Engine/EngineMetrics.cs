@@ -25,5 +25,12 @@ public sealed class EngineMetrics : IDisposable
 
     public Counter<long> PoolMisses { get; }
 
+    public void ObserveEngine(Func<IEnumerable<Measurement<long>>> queueLengths, Func<IEnumerable<Measurement<int>>> connectionStates)
+    {
+        _meter.CreateObservableGauge("queue_length", queueLengths, description: "Messages waiting in a consumer queue");
+        _meter.CreateObservableGauge("connection_state", connectionStates,
+            description: "0 Connecting, 1 Live, 2 Reconnecting, 3 Blocked, 4 Stopped");
+    }
+
     public void Dispose() => _meter.Dispose();
 }
