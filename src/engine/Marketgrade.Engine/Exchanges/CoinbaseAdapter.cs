@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Marketgrade.Engine.Books;
+using Microsoft.Extensions.Logging;
 
 namespace Marketgrade.Engine.Exchanges;
 
@@ -21,6 +23,9 @@ public sealed class CoinbaseAdapter(Uri? uri = null) : ExchangeAdapter
         """{"type":"subscribe","product_ids":["BTC-USD"],"channel":"level2"}"""u8.ToArray(),
         """{"type":"subscribe","channel":"heartbeats"}"""u8.ToArray(),
     ];
+
+    public override BookHandler CreateBookHandler(PairRules rules, EngineOptions options, ILogger? logger = null) =>
+        new CoinbaseBookHandler(this, rules, options.CoinbaseBookCapacity, logger);
 
     public override MessageKind Classify(ReadOnlySpan<byte> message)
     {
