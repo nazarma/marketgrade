@@ -1,8 +1,10 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json.Serialization;
 using Marketgrade.Backend;
 using Marketgrade.Engine;
+using Marketgrade.Engine.Exchanges;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 
@@ -20,6 +22,13 @@ builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .AllowAnyMethod()
     .AllowAnyHeader()));
 builder.Services.AddHostedService<ParentProcessWatcher>();
+builder.Services.AddSingleton(services => new MarketEngine(
+    new EngineOptions(),
+    ExchangeAdapters.CreateDefault(),
+    services.GetRequiredService<ILoggerFactory>().CreateLogger("Marketgrade.Engine")));
+builder.Services.AddHostedService<EngineHostedService>();
+builder.Services.ConfigureHttpJsonOptions(options =>
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
 
@@ -48,6 +57,7 @@ app.Use(async (context, next) =>
 });
 
 app.MapGet("/health", () => new { status = "ok", version = EngineInfo.Version, startedAtUtc });
+app.MapGet("/engine/status", (MarketEngine engine) => new { status = engine.Status, events = engine.GetRecentEvents(50) });
 
 app.Lifetime.ApplicationStarted.Register(() =>
 {

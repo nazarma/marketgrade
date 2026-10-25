@@ -330,7 +330,14 @@ public sealed class ExchangeConnection
     private void AddEvent(string @event, string? detail = null)
     {
         _events.Add(_adapter.Name, @event, detail);
-        _logger.LogInformation("{Exchange}: {Event} {Detail}", _adapter.Name, @event, detail);
+        if (detail is null)
+        {
+            _logger.LogInformation("{Exchange}: {Event}", _adapter.Name, @event);
+        }
+        else
+        {
+            _logger.LogInformation("{Exchange}: {Event} ({Detail})", _adapter.Name, @event, detail);
+        }
     }
 
     private static string Format(TimeSpan time) => time switch
