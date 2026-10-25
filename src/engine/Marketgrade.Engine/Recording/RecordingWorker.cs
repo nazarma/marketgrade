@@ -12,7 +12,7 @@ namespace Marketgrade.Engine.Recording;
 /// <param name="freeSpace">Free bytes on the drive of a folder, or null if unknown; tests replace it.</param>
 internal sealed class RecordingWorker(RecordingManager manager, Func<string, long?>? freeSpace = null)
 {
-    private readonly Func<string, long?> _freeSpace = freeSpace ?? FreeSpace;
+    private readonly Func<string, long?> _freeSpace = freeSpace ?? RecordingFiles.FreeSpace;
 
     /// <summary>Files that failed to compress are not tried again until the next start, when recovery has checked them.</summary>
     private readonly HashSet<string> _failed = [];
@@ -216,24 +216,6 @@ internal sealed class RecordingWorker(RecordingManager manager, Func<string, lon
         finally
         {
             File.Delete(temp);
-        }
-    }
-
-    /// <summary>Free space on the drive of <paramref name="folder"/>, or of its nearest existing parent.</summary>
-    private static long? FreeSpace(string folder)
-    {
-        try
-        {
-            var existing = new DirectoryInfo(folder);
-            while (existing is { Exists: false })
-            {
-                existing = existing.Parent;
-            }
-            return existing is null ? null : new DriveInfo(existing.FullName).AvailableFreeSpace;
-        }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            return null;
         }
     }
 

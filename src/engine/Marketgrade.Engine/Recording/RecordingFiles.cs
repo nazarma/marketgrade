@@ -129,6 +129,24 @@ public static partial class RecordingFiles
         return folders;
     }
 
+    /// <summary>Free space on the drive of <paramref name="folder"/>, or of its nearest existing parent.</summary>
+    public static long? FreeSpace(string folder)
+    {
+        try
+        {
+            var existing = new DirectoryInfo(folder);
+            while (existing is { Exists: false })
+            {
+                existing = existing.Parent;
+            }
+            return existing is null ? null : new DriveInfo(existing.FullName).AvailableFreeSpace;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
     /// <summary>True for a leftover of an interrupted compression in the folder layout.</summary>
     public static bool IsTempFile(string path) =>
         path.EndsWith(TempExtension, StringComparison.Ordinal) && TryParse(path[..^".tmp".Length], out _);

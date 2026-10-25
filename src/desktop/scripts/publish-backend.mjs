@@ -37,6 +37,8 @@ execFileSync(
     "--runtime", runtimeId,
     "--self-contained",
     "-p:PublishSingleFile=true",
+    // SQLite's native library goes inside the single file too.
+    "-p:IncludeNativeLibrariesForSelfExtract=true",
     "--output", publishDir,
   ],
   { stdio: "inherit" },
@@ -46,5 +48,7 @@ const extension = runtimeId.startsWith("win-") ? ".exe" : "";
 const binariesDir = path.join(desktopDir, "binaries");
 mkdirSync(binariesDir, { recursive: true });
 const target = path.join(binariesDir, `marketgrade-backend-${targetTriple}${extension}`);
+// macOS kills a signed executable that was overwritten in place, so the old one is removed first.
+rmSync(target, { force: true });
 copyFileSync(path.join(publishDir, `Marketgrade.Backend${extension}`), target);
 console.log(`Sidecar written to ${path.relative(repoDir, target)}`);

@@ -30,5 +30,8 @@ public class EngineStatusEndpointTests(BackendFactory factory) : IClassFixture<B
         Assert.All(exchanges, e => Assert.Equal("Stopped", e.GetProperty("state").GetString()));
         Assert.All(exchanges, e => Assert.Equal(0, e.GetProperty("messagesPerSecond").GetDouble()));
         Assert.Equal(JsonValueKind.Array, json.RootElement.GetProperty("events").ValueKind);
+        var recording = json.RootElement.GetProperty("status").GetProperty("recording");
+        Assert.Equal("Off", recording.GetProperty("state").GetString());
+        Assert.Equal(Path.Combine(factory.DataFolder, "recordings"), recording.GetProperty("folder").GetString());
     }
 }
