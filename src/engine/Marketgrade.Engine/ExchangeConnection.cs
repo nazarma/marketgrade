@@ -41,6 +41,7 @@ public sealed class ExchangeConnection
     private string? _lastError;
     private ClientWebSocket? _socket;
     private bool _deadBySilence;
+    private string? _reconnectReason;
     private Task? _run;
 
     public ExchangeConnection(
@@ -80,6 +81,21 @@ public sealed class ExchangeConnection
 
     /// <summary><see cref="Stopwatch"/> timestamp of the last message, or 0 before the first one.</summary>
     public long LastMessageTimestamp => Interlocked.Read(ref _lastMessageTimestamp);
+
+    /// <summary>
+    /// Ends connection <paramref name="connectionId"/> and connects again with the normal delays, for
+    /// example because its book needs a new snapshot. Does nothing if that connection is no longer live.
+    /// Safe to call from any thread.
+    /// </summary>
+    public void RequestReconnect(long connectionId, string reason)
+    {
+        if (State != ConnectionState.Live || ConnectionId != connectionId)
+        {
+            return;
+        }
+        Volatile.Write(ref _reconnectReason, reason);
+        Volatile.Read(ref _socket)?.Abort();
+    }
 
     public void Start()
     {
@@ -172,6 +188,7 @@ public sealed class ExchangeConnection
     {
         using var socket = new ClientWebSocket();
         socket.Options.CollectHttpResponseDetails = true;
+        Volatile.Write(ref _reconnectReason, null);
         Volatile.Write(ref _socket, socket);
         if (stopToken.IsCancellationRequested)
         {
@@ -231,6 +248,10 @@ public sealed class ExchangeConnection
         {
             end = new ConnectionEnd(EndKind.Failed, "dead", $"Dead after {Format(_options.DeadAfter)} silence", null, TimeSpan.Zero);
         }
+        catch (Exception) when (Volatile.Read(ref _reconnectReason) is { } reason)
+        {
+            end = new ConnectionEnd(EndKind.Failed, "requested", "Reconnect requested", reason, TimeSpan.Zero);
+        }
         catch (Exception e) when (e is WebSocketException or IOException or OperationCanceledException or InvalidDataException)
         {
             end = new ConnectionEnd(EndKind.Failed, "error", "Connection lost", e.Message, TimeSpan.Zero);
@@ -243,7 +264,7 @@ public sealed class ExchangeConnection
 
         var liveFor = Stopwatch.GetElapsedTime(connectedAt);
         if (end.Kind == EndKind.Failed
-            && end.Reason != "dead"
+            && end.Reason is not ("dead" or "requested")
             && _adapter.MaxConnectionLifetime is { } lifetime
             && liveFor >= lifetime - _options.ScheduledCloseTolerance)
         {

@@ -63,6 +63,32 @@ public class ExchangeConnectionTests
     }
 
     [Fact]
+    public async Task Requested_reconnect_ends_the_live_connection_and_connects_again()
+    {
+        await using var server = await FakeExchangeServer.StartAsync(async c =>
+        {
+            await c.SendAsync($"connection {c.Index}");
+            await c.Closed;
+        });
+        await using var harness = Harness.Start(server, s_fast with { DeadAfter = TimeSpan.FromSeconds(10) });
+        var first = await harness.ReadAsync();
+        first.Release();
+
+        // A request for a connection that is not the live one is ignored.
+        harness.Connection.RequestReconnect(connectionId: 7, "stale");
+        harness.Connection.RequestReconnect(connectionId: 1, "Checksum mismatch");
+
+        var second = await harness.ReadAsync();
+        Assert.Equal(2, second.ConnectionId);
+        second.Release();
+        Assert.Equal(2, server.Connections.Count);
+        Assert.Equal(1, harness.Connection.ReconnectCount);
+        Assert.Contains(harness.Events.GetRecent(10),
+            e => e.Event == "Reconnect requested" && e.Detail!.StartsWith("Checksum mismatch; reconnecting in", StringComparison.Ordinal));
+        Assert.DoesNotContain(harness.Events.GetRecent(10), e => e.Detail?.Contains("stale", StringComparison.Ordinal) == true);
+    }
+
+    [Fact]
     public async Task Silence_leads_to_reconnect_with_a_new_connection_id()
     {
         await using var server = await FakeExchangeServer.StartAsync(async c =>
