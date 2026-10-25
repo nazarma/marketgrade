@@ -56,7 +56,23 @@ csharp_indent_switch_labels = true
 csharp_space_after_cast = false
 csharp_space_after_keywords_in_control_flow_statements = true
 
-# Naming: private fields are _camelCase
+# Naming: constants are PascalCase, private static fields s_camelCase, other private fields _camelCase
+dotnet_naming_rule.constants_pascal.symbols = constant_fields
+dotnet_naming_rule.constants_pascal.style = pascal
+dotnet_naming_rule.constants_pascal.severity = warning
+dotnet_naming_symbols.constant_fields.applicable_kinds = field
+dotnet_naming_symbols.constant_fields.required_modifiers = const
+dotnet_naming_style.pascal.capitalization = pascal_case
+
+dotnet_naming_rule.private_static_fields_s.symbols = private_static_fields
+dotnet_naming_rule.private_static_fields_s.style = s_camel
+dotnet_naming_rule.private_static_fields_s.severity = warning
+dotnet_naming_symbols.private_static_fields.applicable_kinds = field
+dotnet_naming_symbols.private_static_fields.applicable_accessibilities = private
+dotnet_naming_symbols.private_static_fields.required_modifiers = static
+dotnet_naming_style.s_camel.required_prefix = s_
+dotnet_naming_style.s_camel.capitalization = camel_case
+
 dotnet_naming_rule.private_fields_underscore.symbols = private_fields
 dotnet_naming_rule.private_fields_underscore.style = underscore_camel
 dotnet_naming_rule.private_fields_underscore.severity = warning
