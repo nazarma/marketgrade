@@ -3,12 +3,18 @@ using Microsoft.Extensions.Logging;
 
 namespace Marketgrade.Engine.Recording;
 
+/// <summary>Size of the recordings in the current folder and free space on its drive, from the latest disk check.</summary>
+/// <param name="TodayBytes">Files of the current UTC day.</param>
+/// <param name="FreeBytes">Null if the drive could not be checked.</param>
+internal sealed record DiskUsage(long TotalBytes, long TodayBytes, long? FreeBytes);
+
 /// <summary>What all recorders share: the current settings, the low-disk pause and the compression queue.</summary>
 internal sealed class RecordingManager
 {
     private readonly List<Recorder> _recorders = [];
     private RecordingSettings _settings;
     private int _paused;
+    private DiskUsage _diskUsage = new(0, 0, null);
 
     public RecordingManager(
         RecordingSettings settings,
@@ -43,6 +49,12 @@ internal sealed class RecordingManager
     {
         get => Volatile.Read(ref _paused) == 1;
         set => Volatile.Write(ref _paused, value ? 1 : 0);
+    }
+
+    public DiskUsage DiskUsage
+    {
+        get => Volatile.Read(ref _diskUsage);
+        set => Volatile.Write(ref _diskUsage, value);
     }
 
     /// <summary>Closed files of finished hours, waiting for compression.</summary>

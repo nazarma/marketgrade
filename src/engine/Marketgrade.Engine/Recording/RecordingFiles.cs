@@ -103,6 +103,32 @@ public static partial class RecordingFiles
 
     public static long TotalBytes(string folder) => Enumerate(folder).Sum(f => f.Length);
 
+    /// <summary>The <c>&lt;exchange&gt;/&lt;yyyy-MM-dd&gt;</c> folders under <paramref name="folder"/>, with their dates.</summary>
+    public static List<(string Path, DateTime Date)> DateFolders(string folder)
+    {
+        var folders = new List<(string, DateTime)>();
+        if (!Directory.Exists(folder))
+        {
+            return folders;
+        }
+        foreach (var exchangeFolder in Directory.EnumerateDirectories(folder))
+        {
+            if (!ExchangeName().IsMatch(Path.GetFileName(exchangeFolder)))
+            {
+                continue;
+            }
+            foreach (var dateFolder in Directory.EnumerateDirectories(exchangeFolder))
+            {
+                if (DateTime.TryParseExact(Path.GetFileName(dateFolder), "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                    DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var date))
+                {
+                    folders.Add((dateFolder, date));
+                }
+            }
+        }
+        return folders;
+    }
+
     /// <summary>True for a leftover of an interrupted compression in the folder layout.</summary>
     public static bool IsTempFile(string path) =>
         path.EndsWith(TempExtension, StringComparison.Ordinal) && TryParse(path[..^".tmp".Length], out _);

@@ -51,6 +51,12 @@ public sealed record EngineOptions
     /// <summary>An uncompressed file left behind (recording turned off, app restarted) is compressed this long after its hour ends.</summary>
     public TimeSpan FinishedHourGrace { get; init; } = TimeSpan.FromMinutes(5);
 
+    /// <summary>Recording pauses when the recordings drive has less free space than this...</summary>
+    public long LowDiskPauseBytes { get; init; } = 1L * 1024 * 1024 * 1024;
+
+    /// <summary>...and resumes when it has more than this.</summary>
+    public long LowDiskResumeBytes { get; init; } = 2L * 1024 * 1024 * 1024;
+
     /// <summary>After a write error, a recorder tries again after this delay.</summary>
     public TimeSpan RecordingRetryDelay { get; init; } = TimeSpan.FromSeconds(5);
 }

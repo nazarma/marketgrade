@@ -5,11 +5,15 @@ using ZstdSharp;
 namespace Marketgrade.Engine.Recording;
 
 /// <summary>
-/// The background work of recording, on one task and never on a recorder: compresses finished hours
-/// and, every retention interval, compresses hours missed so far.
+/// The background work of recording, on one task and never on a recorder: compresses finished hours,
+/// checks the disk (pausing recording when it is almost full) and, every retention interval,
+/// compresses hours missed so far and deletes old recordings.
 /// </summary>
-internal sealed class RecordingWorker(RecordingManager manager)
+/// <param name="freeSpace">Free bytes on the drive of a folder, or null if unknown; tests replace it.</param>
+internal sealed class RecordingWorker(RecordingManager manager, Func<string, long?>? freeSpace = null)
 {
+    private readonly Func<string, long?> _freeSpace = freeSpace ?? FreeSpace;
+
     /// <summary>Files that failed to compress are not tried again until the next start, when recovery has checked them.</summary>
     private readonly HashSet<string> _failed = [];
     private long _lastSweep;
@@ -34,22 +38,103 @@ internal sealed class RecordingWorker(RecordingManager manager)
     {
         try
         {
+            CheckDisk();
             while (manager.CompressionQueue.Reader.TryRead(out var path))
             {
-                if (manager.Settings.Compress)
+                if (manager.Settings.Compress && await CompressAsync(path, stopToken))
                 {
-                    await CompressAsync(path, stopToken);
+                    DeleteOldRecordings();
                 }
             }
             if (_lastSweep == 0 || manager.Time.GetElapsedTime(_lastSweep) >= manager.Options.RetentionInterval)
             {
                 _lastSweep = manager.Time.GetTimestamp();
                 await CompressMissedHoursAsync(stopToken);
+                DeleteOldRecordings();
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
             manager.Logger.LogWarning("Recording maintenance failed: {Error}", e.Message);
+        }
+    }
+
+    /// <summary>Updates the disk usage and pauses recording below the low-disk limit, resuming above the higher one.</summary>
+    internal void CheckDisk()
+    {
+        var folder = manager.Settings.Folder;
+        var files = RecordingFiles.Enumerate(folder);
+        var today = RecordingFiles.HourOf(manager.Time.GetUtcNow()) / 24;
+        var free = _freeSpace(folder);
+        manager.DiskUsage = new DiskUsage(files.Sum(f => f.Length), files.Where(f => f.Hour / 24 == today).Sum(f => f.Length), free);
+        if (free is not { } bytes)
+        {
+            return;
+        }
+
+        if (!manager.Paused && bytes < manager.Options.LowDiskPauseBytes)
+        {
+            manager.Paused = true;
+            var detail = $"{Gigabytes(bytes)} free on the recordings drive, resuming above {Gigabytes(manager.Options.LowDiskResumeBytes)}";
+            manager.Events.Add("Recording", "Recording paused, disk almost full", detail);
+            manager.Logger.LogWarning("Recording paused: {Detail}", detail);
+        }
+        else if (manager.Paused && bytes > manager.Options.LowDiskResumeBytes)
+        {
+            manager.Paused = false;
+            manager.Events.Add("Recording", "Recording resumed", $"{Gigabytes(bytes)} free on the recordings drive");
+            manager.Logger.LogInformation("Recording resumed, {Free} free", Gigabytes(bytes));
+        }
+    }
+
+    /// <summary>
+    /// Deletes recordings older than the retention period, then the oldest until the total fits the
+    /// maximum disk space. Only files in the folder layout are deleted, never the current hour's or one
+    /// being written. Empty date folders are removed, except today's.
+    /// </summary>
+    internal void DeleteOldRecordings()
+    {
+        var settings = manager.Settings;
+        var now = manager.Time.GetUtcNow();
+        var currentHour = RecordingFiles.HourOf(now);
+        var keepAfter = now.UtcDateTime - TimeSpan.FromDays(settings.KeepDays);
+        var files = RecordingFiles.Enumerate(settings.Folder);
+        var total = files.Sum(f => f.Length);
+        long deletedFiles = 0, deletedBytes = 0;
+        foreach (var file in files.Where(f => f.Hour < currentHour).OrderBy(f => f.Hour).ThenBy(f => f.Exchange).ThenBy(f => f.Part))
+        {
+            var tooOld = RecordingFiles.HourStart(file.Hour + 1) <= keepAfter;
+            if (!tooOld && total <= settings.MaxDiskBytes)
+            {
+                break;
+            }
+            if (manager.IsActive(file.Path))
+            {
+                continue;
+            }
+            try
+            {
+                File.Delete(file.Path);
+                total -= file.Length;
+                deletedFiles++;
+                deletedBytes += file.Length;
+            }
+            catch (Exception e) when (e is IOException or UnauthorizedAccessException)
+            {
+                manager.Logger.LogWarning("Could not delete {Path}: {Error}", file.Path, e.Message);
+            }
+        }
+
+        foreach (var (folder, date) in RecordingFiles.DateFolders(settings.Folder))
+        {
+            if (date != now.UtcDateTime.Date && !Directory.EnumerateFileSystemEntries(folder).Any())
+            {
+                Directory.Delete(folder);
+            }
+        }
+        if (deletedFiles > 0)
+        {
+            manager.Logger.LogInformation("Deleted {Files} old recordings ({Bytes} bytes)", deletedFiles, deletedBytes);
         }
     }
 
@@ -133,6 +218,26 @@ internal sealed class RecordingWorker(RecordingManager manager)
             File.Delete(temp);
         }
     }
+
+    /// <summary>Free space on the drive of <paramref name="folder"/>, or of its nearest existing parent.</summary>
+    private static long? FreeSpace(string folder)
+    {
+        try
+        {
+            var existing = new DirectoryInfo(folder);
+            while (existing is { Exists: false })
+            {
+                existing = existing.Parent;
+            }
+            return existing is null ? null : new DriveInfo(existing.FullName).AvailableFreeSpace;
+        }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            return null;
+        }
+    }
+
+    private static string Gigabytes(long bytes) => $"{bytes / (double)RecordingSettings.GB:0.0} GB";
 
     private static (long Records, long Length, string? Error) Scan(RecordingReader reader)
     {
