@@ -10,6 +10,7 @@ tauri-build = { version = "2.7.4", features = [] }
 
 [dependencies]
 tauri = { version = "2.12.5", features = [] }
+tauri-plugin-dialog = "2.8.3"
 tauri-plugin-shell = "2.5.0"
 getrandom = "0.4.3"
 hex = "0.4.3"

@@ -75,9 +75,15 @@ fn spawn_backend(
     app: &AppHandle,
     token: &str,
 ) -> Result<(BackendProcess, oneshot::Receiver<Result<u16, String>>), String> {
+    // Settings and recordings live in the operating system's app data folder, in dev and production.
+    let data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("No app data folder: {e}"))?;
     let (mut events, child) = backend_command(app)?
         .env("MARKETGRADE_TOKEN", token)
         .env("MARKETGRADE_PARENT_PID", std::process::id().to_string())
+        .env("MARKETGRADE_DATA_DIR", data_dir)
         .spawn()
         .map_err(|e| format!("Could not start backend: {e}"))?;
 
@@ -185,6 +191,7 @@ async fn get_backend_info(
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(Backend::default())
         .invoke_handler(tauri::generate_handler![get_backend_info])
         .setup(|app| {
