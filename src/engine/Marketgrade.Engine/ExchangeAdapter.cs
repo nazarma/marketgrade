@@ -1,3 +1,6 @@
+using Marketgrade.Engine.Books;
+using Microsoft.Extensions.Logging;
+
 namespace Marketgrade.Engine;
 
 /// <summary>Everything that differs between exchanges. Connections, queues and consumers are shared code.</summary>
@@ -19,4 +22,7 @@ public abstract class ExchangeAdapter
 
     /// <summary>Classifies one complete message. Must not allocate.</summary>
     public abstract MessageKind Classify(ReadOnlySpan<byte> message);
+
+    /// <summary>The handler that keeps this exchange's order book, or null for an exchange without one.</summary>
+    public virtual BookHandler? CreateBookHandler(PairRules rules, EngineOptions options, ILogger? logger = null) => null;
 }

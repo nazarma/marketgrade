@@ -59,4 +59,13 @@ public sealed record EngineOptions
 
     /// <summary>After a write error, a recorder tries again after this delay.</summary>
     public TimeSpan RecordingRetryDelay { get; init; } = TimeSpan.FromSeconds(5);
+
+    /// <summary>Levels per side; Kraken keeps 1,000, and an update can add a few before the cut.</summary>
+    public int KrakenBookCapacity { get; init; } = 2_000;
+
+    /// <summary>Starting levels per side; a full side doubles. The Coinbase snapshot has about 20,000 per side.</summary>
+    public int CoinbaseBookCapacity { get; init; } = 50_000;
+
+    /// <summary>Starting levels per side; a full side doubles. The REST snapshot has at most 5,000 per side.</summary>
+    public int BinanceBookCapacity { get; init; } = 20_000;
 }

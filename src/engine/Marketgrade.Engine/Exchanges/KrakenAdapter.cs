@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Marketgrade.Engine.Books;
+using Microsoft.Extensions.Logging;
 
 namespace Marketgrade.Engine.Exchanges;
 
@@ -6,6 +8,9 @@ namespace Marketgrade.Engine.Exchanges;
 public sealed class KrakenAdapter(Uri? uri = null) : ExchangeAdapter
 {
     public static readonly Uri DefaultUri = new("wss://ws.kraken.com/v2");
+
+    /// <summary>Levels per side we subscribe to and keep.</summary>
+    public const int BookDepth = 1000;
 
     public override int Id => 1;
 
@@ -20,6 +25,9 @@ public sealed class KrakenAdapter(Uri? uri = null) : ExchangeAdapter
     [
         """{"method":"subscribe","params":{"channel":"book","symbol":["BTC/USD"],"depth":1000}}"""u8.ToArray(),
     ];
+
+    public override BookHandler CreateBookHandler(PairRules rules, EngineOptions options, ILogger? logger = null) =>
+        new KrakenBookHandler(this, rules, options.KrakenBookCapacity, logger);
 
     public override MessageKind Classify(ReadOnlySpan<byte> message)
     {
