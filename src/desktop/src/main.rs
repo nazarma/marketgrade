@@ -47,11 +47,14 @@ struct BackendState {
 struct Backend(Mutex<BackendState>);
 
 /// The only difference between dev and production: which executable runs the backend.
+/// In dev it is the build's apphost, so the process is named Marketgrade.Backend (for dotnet-counters).
 #[cfg(debug_assertions)]
 fn backend_command(app: &AppHandle) -> Result<Command, String> {
-    let dll = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../artifacts/bin/Marketgrade.Backend/debug/Marketgrade.Backend.dll");
-    Ok(app.shell().command("dotnet").arg(dll))
+    let exe = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!(
+        "../../artifacts/bin/Marketgrade.Backend/debug/Marketgrade.Backend{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    Ok(app.shell().command(exe))
 }
 
 #[cfg(not(debug_assertions))]
