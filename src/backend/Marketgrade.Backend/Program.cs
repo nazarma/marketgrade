@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 // Standard output is reserved for the ready line read by the desktop shell.
 builder.Logging.ClearProviders();
 builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
+builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 
 builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
 
