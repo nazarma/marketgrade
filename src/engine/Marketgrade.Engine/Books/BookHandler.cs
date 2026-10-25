@@ -102,7 +102,13 @@ public abstract class BookHandler
         Failure = kind;
         Cause = cause;
         Book.State = BookState.Invalid;
+        OnFailed();
         return HandleOutcome.Failed;
+    }
+
+    /// <summary>Called after every failure, also one found by <see cref="Handle"/> itself.</summary>
+    protected virtual void OnFailed()
+    {
     }
 
     protected HandleOutcome Applied(MessageBuffer message)

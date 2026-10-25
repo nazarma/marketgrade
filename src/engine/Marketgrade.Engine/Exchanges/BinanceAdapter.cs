@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Marketgrade.Engine.Books;
+using Microsoft.Extensions.Logging;
 
 namespace Marketgrade.Engine.Exchanges;
 
@@ -22,6 +24,9 @@ public sealed class BinanceAdapter(Uri? uri = null) : ExchangeAdapter
     public override IReadOnlyList<byte[]> SubscribeMessages { get; } = [];
 
     public override TimeSpan? MaxConnectionLifetime => TimeSpan.FromHours(24);
+
+    public override BookHandler CreateBookHandler(PairRules rules, EngineOptions options, ILogger? logger = null) =>
+        new BinanceBookHandler(this, rules, options.BinanceBookCapacity, logger);
 
     public override MessageKind Classify(ReadOnlySpan<byte> message)
     {
