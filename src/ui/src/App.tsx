@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   getBackendStatus,
   getEngineStatus,
@@ -6,11 +6,13 @@ import {
   type ConnectionEvent,
   type EngineStatus,
   type ExchangeStatus,
+  type RecordingStatus,
 } from "@/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatSinceLastMessage, stateBadge } from "@/exchangeState";
+import { formatBytes, formatSinceLastMessage, recordingBadge, stateBadge } from "@/exchangeState";
+import { RecordingSettingsForm } from "@/RecordingSettingsForm";
 
 const POLL_INTERVAL_MS = 1000;
 const RECENT_EVENTS = 10;
@@ -20,9 +22,12 @@ type ConnectionState =
   | { kind: "connected"; backend: BackendStatus; engine: EngineStatus | null }
   | { kind: "error"; message: string };
 
+type Screen = "status" | "settings";
+
 export default function App() {
   const [state, setState] = useState<ConnectionState>({ kind: "starting" });
   const [attempt, setAttempt] = useState(0);
+  const [screen, setScreen] = useState<Screen>("status");
 
   useEffect(() => {
     let current = true;
@@ -66,7 +71,17 @@ export default function App() {
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 p-8">
       <header className="flex flex-wrap items-baseline justify-between gap-4">
-        <h1 className="text-2xl font-semibold tracking-tight">Marketgrade</h1>
+        <div className="flex items-baseline gap-6">
+          <h1 className="text-2xl font-semibold tracking-tight">Marketgrade</h1>
+          <nav className="flex gap-4 text-sm">
+            <NavLink screen="status" current={screen} onSelect={setScreen}>
+              Status
+            </NavLink>
+            <NavLink screen="settings" current={screen} onSelect={setScreen}>
+              Settings
+            </NavLink>
+          </nav>
+        </div>
         <BackendLine state={state} />
       </header>
 
@@ -82,28 +97,95 @@ export default function App() {
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Exchanges</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {engine ? (
-            <ExchangeTable exchanges={engine.status.exchanges} />
-          ) : (
-            <p className="text-muted-foreground">Waiting for the engine...</p>
-          )}
-        </CardContent>
-      </Card>
+      {screen === "settings" && state.kind === "connected" && <RecordingSettingsForm />}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent events</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <RecentEvents events={engine?.events ?? []} />
-        </CardContent>
-      </Card>
+      {screen === "status" && (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle>Exchanges</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4">
+              {engine ? (
+                <ExchangeTable exchanges={engine.status.exchanges} />
+              ) : (
+                <p className="text-muted-foreground">Waiting for the engine...</p>
+              )}
+              {engine?.status.recording && <RecordingLine recording={engine.status.recording} />}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Recent events</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <RecentEvents events={engine?.events ?? []} />
+            </CardContent>
+          </Card>
+        </>
+      )}
     </main>
+  );
+}
+
+function NavLink({
+  screen,
+  current,
+  onSelect,
+  children,
+}: {
+  screen: Screen;
+  current: Screen;
+  onSelect: (screen: Screen) => void;
+  children: ReactNode;
+}) {
+  const active = screen === current;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(screen)}
+      aria-current={active ? "page" : undefined}
+      className={
+        active ? "font-medium text-foreground" : "text-muted-foreground hover:text-foreground"
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+function RecordingLine({ recording }: { recording: RecordingStatus }) {
+  const badge = recordingBadge(recording.state);
+  return (
+    <div
+      className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t pt-4 text-sm"
+      title={recording.lastError ?? recording.folder}
+    >
+      <span className="font-medium">Recording</span>
+      <Badge className={badge.className}>{badge.label}</Badge>
+      <span className="text-muted-foreground">
+        Today{" "}
+        <span className="font-mono text-foreground tabular-nums">
+          {formatBytes(recording.todayBytes)}
+        </span>
+      </span>
+      <span className="text-muted-foreground">
+        Total{" "}
+        <span className="font-mono text-foreground tabular-nums">
+          {formatBytes(recording.totalBytes)}
+        </span>
+      </span>
+      <span className="text-muted-foreground">
+        Free{" "}
+        <span className="font-mono text-foreground tabular-nums">
+          {formatBytes(recording.freeBytes)}
+        </span>
+      </span>
+      {recording.droppedMessages > 0 && (
+        <span className="text-warning">{recording.droppedMessages} not recorded</span>
+      )}
+    </div>
   );
 }
 
