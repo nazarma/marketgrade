@@ -5,9 +5,11 @@ using Microsoft.Extensions.Logging;
 namespace Marketgrade.Engine.Exchanges;
 
 /// <summary>Kraken spot WebSocket v2. Heartbeats arrive automatically once any channel is subscribed.</summary>
-public sealed class KrakenAdapter(Uri? uri = null) : ExchangeAdapter
+public sealed class KrakenAdapter(Uri? uri = null, Uri? restUri = null) : ExchangeAdapter
 {
     public static readonly Uri DefaultUri = new("wss://ws.kraken.com/v2");
+
+    public static readonly Uri DefaultRestUri = new("https://api.kraken.com/");
 
     /// <summary>Levels per side we subscribe to and keep.</summary>
     public const int BookDepth = 1000;
@@ -25,6 +27,22 @@ public sealed class KrakenAdapter(Uri? uri = null) : ExchangeAdapter
     [
         """{"method":"subscribe","params":{"channel":"book","symbol":["BTC/USD"],"depth":1000}}"""u8.ToArray(),
     ];
+
+    // Kraken's REST API still names bitcoin XBT.
+    public override Uri PairRulesUri { get; } = new(restUri ?? DefaultRestUri, "0/public/AssetPairs?pair=XBTUSD");
+
+    /// <summary><c>pair_decimals</c> and <c>lot_decimals</c> of the only pair in <c>result</c>.</summary>
+    public override PairRules ParsePairRules(ReadOnlySpan<byte> json)
+    {
+        using var document = JsonDocument.Parse(json.ToArray());
+        var root = document.RootElement;
+        if (root.TryGetProperty("error", out var errors) && errors.GetArrayLength() > 0)
+        {
+            throw new FormatException($"Kraken AssetPairs error: {errors}");
+        }
+        var pair = root.GetProperty("result").EnumerateObject().Single().Value;
+        return new PairRules(Id, Pair, pair.GetProperty("pair_decimals").GetInt32(), pair.GetProperty("lot_decimals").GetInt32());
+    }
 
     public override BookHandler CreateBookHandler(PairRules rules, EngineOptions options, ILogger? logger = null) =>
         new KrakenBookHandler(this, rules, options.KrakenBookCapacity, logger);

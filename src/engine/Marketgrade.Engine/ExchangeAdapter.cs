@@ -23,6 +23,12 @@ public abstract class ExchangeAdapter
     /// <summary>Classifies one complete message. Must not allocate.</summary>
     public abstract MessageKind Classify(ReadOnlySpan<byte> message);
 
+    /// <summary>The public REST request that returns the pair's tick and step sizes, or null for an exchange without a book.</summary>
+    public virtual Uri? PairRulesUri => null;
+
+    /// <summary>Reads the response of <see cref="PairRulesUri"/>; throws if it is not what the exchange documents.</summary>
+    public virtual PairRules ParsePairRules(ReadOnlySpan<byte> json) => throw new NotSupportedException($"{Name} has no pair rules");
+
     /// <summary>The handler that keeps this exchange's order book, or null for an exchange without one.</summary>
     public virtual BookHandler? CreateBookHandler(PairRules rules, EngineOptions options, ILogger? logger = null) => null;
 }
