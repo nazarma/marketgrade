@@ -5,8 +5,8 @@ exchange. It tracks data health (delay, gaps, correctness), liquidity (spread, d
 large order) and market maker performance against agreed targets. The first release covers
 Kraken, Coinbase and Binance.
 
-**Status: early development.** The repository currently contains the application skeleton: the
-desktop window starts the backend and shows whether it is connected.
+**Status: early development.** The engine connects to Kraken, Coinbase and Binance, reconnects when a
+connection dies, and the desktop window shows each exchange's state and messages per second.
 
 ## Prerequisites
 
@@ -40,6 +40,24 @@ cargo check --manifest-path src/desktop/Cargo.toml
 
 Benchmarks: `dotnet run -c Release --project benchmarks/Marketgrade.Benchmarks`.
 
+## Diagnostics
+
+The probe tool runs the engine against the real exchanges without the desktop app, for example to
+check which exchanges are reachable from your network:
+
+```sh
+dotnet run --project tools/Marketgrade.Probe -- --seconds 60 --interval 5
+```
+
+`--capture <dir>` saves real sample messages of each kind instead; the test fixtures in
+`tests/Marketgrade.Engine.Tests/Fixtures` were captured this way.
+
+Engine metrics while the app runs (install once with `dotnet tool install -g dotnet-counters`):
+
+```sh
+dotnet-counters monitor --name Marketgrade.Backend --counters Marketgrade.Engine
+```
+
 ## Production backend
 
 `pnpm publish:backend` publishes the backend as a self-contained executable into
@@ -62,6 +80,7 @@ pnpm tauri build --no-bundle --config src/desktop/tauri.release.conf.json
 | `src/desktop`                | Tauri 2 desktop shell                            |
 | `tests`                      | xUnit tests                                      |
 | `benchmarks`                 | BenchmarkDotNet benchmarks                       |
+| `tools`                      | Probe tool for live exchange connections         |
 | `docs/architecture.md`       | Architecture decisions                           |
 
 ## License
