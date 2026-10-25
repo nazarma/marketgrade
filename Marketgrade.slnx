@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/Marketgrade.Benchmarks/Marketgrade.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/src/" />
   <Folder Name="/src/backend/">
     <Project Path="src/backend/Marketgrade.Backend/Marketgrade.Backend.csproj" />
