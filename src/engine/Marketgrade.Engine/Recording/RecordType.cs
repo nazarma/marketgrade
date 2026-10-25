@@ -13,4 +13,10 @@ public enum RecordType : byte
 
     /// <summary>Payload: first seq, last seq and count of the messages not recorded (three i64).</summary>
     Gap = 4,
+
+    /// <summary>Payload: the raw REST response the book was rebuilt from (Binance depth snapshot).</summary>
+    Snapshot = 5,
+
+    /// <summary>Payload: the UTF-8 reason the book became invalid.</summary>
+    BookReset = 6,
 }

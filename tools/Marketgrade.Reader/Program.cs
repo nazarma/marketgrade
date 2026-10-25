@@ -61,7 +61,7 @@ static int Cat(string path, long limit, bool payload)
             var (first, last, count) = RecordFormat.ReadGapPayload(reader.Payload);
             line += $"  seq {first} to {last}, {count} not recorded";
         }
-        else if (payload || r.Type != RecordType.Message)
+        else if (payload || r.Type is not (RecordType.Message or RecordType.Snapshot))
         {
             line += "  " + Encoding.UTF8.GetString(reader.Payload);
         }
@@ -140,7 +140,8 @@ static int Stats(string folder)
         Console.WriteLine($"{exchange.Key}");
         Console.WriteLine($"  files      {exchange.Count()} ({compressedFiles} compressed)");
         Console.WriteLine($"  records    {messages} messages, {byType.GetValueOrDefault(RecordType.ConnectionOpened)} opened, " +
-            $"{byType.GetValueOrDefault(RecordType.ConnectionClosed)} closed, {gaps} gaps");
+            $"{byType.GetValueOrDefault(RecordType.ConnectionClosed)} closed, {gaps} gaps, " +
+            $"{byType.GetValueOrDefault(RecordType.Snapshot)} snapshots, {byType.GetValueOrDefault(RecordType.BookReset)} book resets");
         Console.WriteLine($"  dropped    {dropped} messages not recorded");
         Console.WriteLine($"  bytes      {payloadBytes:N0} payload, {disk:N0} on disk");
         if (messages > 0)

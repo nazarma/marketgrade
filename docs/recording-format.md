@@ -57,15 +57,21 @@ Each record is a fixed 40-byte header followed by its payload.
 |    2 | `ConnectionOpened` | UTF-8 URL of the connection                                 |
 |    3 | `ConnectionClosed` | UTF-8 reason, for example `Closed by server: 1000 bye`      |
 |    4 | `Gap`              | first seq (i64), last seq (i64), count (i64) of messages not recorded |
+|    5 | `Snapshot`         | the raw REST response a book was rebuilt from, exactly as received (Binance depth snapshot) |
+|    6 | `BookReset`        | UTF-8 reason the book became invalid, for example `Checksum mismatch: expected 2223836207, got 4100235590` |
+
+Types 5 and 6 were added with the order books. They let a replay rebuild Binance books, which start
+from a REST snapshot rather than a WebSocket message, and show where the live book failed. Readers
+must accept types 1 to 6; the format version stays 1.
 
 ### Sequence numbers
 
 Every message of an exchange gets the next sequence number, starting at 1 when the app starts and
 continuing across reconnects. `Message` records therefore have contiguous sequence numbers unless a
-`Gap` record says otherwise. `ConnectionOpened` and `ConnectionClosed` carry the sequence number of
-the last message before them; they do not use up a number. A `Gap` record carries the sequence
-number of the last message recorded before the gap. Sequence numbers start at 1 again after the app
-restarts.
+`Gap` record says otherwise. `ConnectionOpened`, `ConnectionClosed`, `Snapshot` and `BookReset`
+carry the sequence number of the last message before them; they do not use up a number. A `Gap`
+record carries the sequence number of the last message recorded before the gap. Sequence numbers
+start at 1 again after the app restarts.
 
 ### Gaps
 
@@ -75,6 +81,11 @@ go missing when:
 - the recorder's queue was full (the disk could not keep up), so the connection dropped the message
   for the recorder only; live statistics still saw it;
 - recording was paused because the disk was almost full, was in an error state, or was turned off.
+
+`Snapshot` and `BookReset` records come from the book worker, not the connection. When the
+recorder's queue is full they are dropped and counted like messages, but they leave no `Gap`
+record. A replay then sees a `BookReset` with no `Snapshot` after it and reports the Binance book as
+missing a snapshot until the next one.
 
 ## Crash safety
 

@@ -90,7 +90,7 @@ public static class RecordFormat
             BinaryPrimitives.ReadInt64LittleEndian(source[16..]),
             BinaryPrimitives.ReadInt64LittleEndian(source[24..]),
             BinaryPrimitives.ReadInt64LittleEndian(source[32..]));
-        return type is >= RecordType.Message and <= RecordType.Gap && length <= MaxPayloadLength;
+        return type is >= RecordType.Message and <= RecordType.BookReset && length <= MaxPayloadLength;
     }
 
     public static void WriteGapPayload(Span<byte> destination, long firstSeq, long lastSeq, long count)

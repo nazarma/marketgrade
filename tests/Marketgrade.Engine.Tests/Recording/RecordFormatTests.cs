@@ -17,6 +17,8 @@ public class RecordFormatTests
             new(RecordType.Gap, 9, 300, 1, gap),
             TestRecordings.Message(20, "", 400),
             TestRecordings.Message(21, new string('x', 200_000), 500),
+            new(RecordType.BookReset, 21, 550, 1, Encoding.UTF8.GetBytes("Update ID gap: expected 101, got 105")),
+            new(RecordType.Snapshot, 21, 560, 1, Encoding.UTF8.GetBytes("{\"lastUpdateId\":100,\"bids\":[],\"asks\":[]}")),
             new(RecordType.ConnectionClosed, 21, 600, 1, Encoding.UTF8.GetBytes("Closed by server")),
         ];
 
@@ -31,6 +33,19 @@ public class RecordFormatTests
             Assert.Equal(records[i].Payload, read[i].Payload);
         }
         Assert.Equal((10, 19, 10), RecordFormat.ReadGapPayload(read[2].Payload));
+    }
+
+    [Fact]
+    public void Unknown_record_type_is_an_invalid_header()
+    {
+        var bytes = TestRecordings.Build([new(RecordType.BookReset, 1, 1, 1, [])]);
+        var headerStart = bytes.Length - RecordFormat.RecordHeaderSize;
+        bytes[headerStart] = 7;
+
+        using var reader = new RecordingReader(new MemoryStream(bytes));
+
+        Assert.False(reader.Read());
+        Assert.StartsWith("Invalid record header", reader.Error);
     }
 
     [Fact]
