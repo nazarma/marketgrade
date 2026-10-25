@@ -1,0 +1,17 @@
+[package]
+name = "marketgrade-desktop"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }
+
+[dependencies]
+tauri = { version = "2.12.5", features = [] }
+tauri-plugin-shell = "2.5.0"
+getrandom = "0.4.3"
+hex = "0.4.3"
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["sync", "time"] }
