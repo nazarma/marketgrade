@@ -24,12 +24,14 @@ internal static class SampleCapture
         ],
         ["Coinbase"] =
         [
-            """{"type":"subscribe","product_ids":["NOPE-USD"],"channel":"level2"}""",
+            """{"type":"subscribe","channel":"nope"}""",
+            """{"type":"nope"}""",
         ],
         ["Binance"] =
         [
             """{"method":"LIST_SUBSCRIPTIONS","id":1}""",
-            """{"method":"SUBSCRIBE","params":["nope"],"id":2}""",
+            """{"method":"SUBSCRIBE","params":"nope","id":2}""",
+            """{"method":"NOPE","id":3}""",
         ],
     };
 
