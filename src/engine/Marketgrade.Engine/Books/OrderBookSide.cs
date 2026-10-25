@@ -4,9 +4,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Marketgrade.Engine.Books;
 
 /// <summary>
-/// One side of a book as two parallel arrays, best level first. Bid prices are stored negated, so both
-/// sides are sorted ascending and share one binary search. Inserting and deleting shift the arrays;
-/// nothing allocates unless the side is full, in which case it doubles and logs a warning.
+/// One side of a book as two parallel arrays sorted ascending, with the best level at the end: almost all
+/// changes are near the best price, so inserting and deleting by shifting moves only the few levels
+/// above it. Ask prices are stored negated, which puts the lowest ask last and lets both sides share
+/// one binary search. Index 0 of <see cref="PriceAt"/> is always the best level. Nothing allocates
+/// unless the side is full, in which case it doubles and logs a warning.
 /// </summary>
 public sealed class OrderBookSide
 {
@@ -34,14 +36,15 @@ public sealed class OrderBookSide
 
     public int Capacity => _keys.Length;
 
-    public long PriceAt(int index) => _bids ? -_keys[index] : _keys[index];
+    /// <summary>The price of the level <paramref name="index"/> steps from the best one.</summary>
+    public long PriceAt(int index) => _bids ? _keys[Count - 1 - index] : -_keys[Count - 1 - index];
 
-    public long AmountAt(int index) => _amounts[index];
+    public long AmountAt(int index) => _amounts[Count - 1 - index];
 
     /// <summary>Sets the amount at a price; 0 deletes the level. Deleting a level that is not there does nothing.</summary>
     public void Set(long price, long amount)
     {
-        var key = _bids ? -price : price;
+        var key = _bids ? price : -price;
         var index = _keys.AsSpan(0, Count).BinarySearch(key);
         if (index >= 0)
         {
@@ -79,7 +82,17 @@ public sealed class OrderBookSide
     }
 
     /// <summary>Keeps only the best <paramref name="depth"/> levels.</summary>
-    public void Truncate(int depth) => Count = Math.Min(Count, depth);
+    public void Truncate(int depth)
+    {
+        if (Count <= depth)
+        {
+            return;
+        }
+        var drop = Count - depth;
+        Array.Copy(_keys, drop, _keys, 0, depth);
+        Array.Copy(_amounts, drop, _amounts, 0, depth);
+        Count = depth;
+    }
 
     public void Clear() => Count = 0;
 

@@ -14,16 +14,13 @@ namespace Marketgrade.Engine.Exchanges;
 /// <c>U</c> above the book's id + 1 means events were missed: the book is invalid and resyncs.</item>
 /// </list>
 /// Fetching is up to the caller (<see cref="ShouldFetch"/>, <see cref="StartFetch"/>, <see cref="OnSnapshot"/>),
-/// at most once per <see cref="FetchInterval"/>. Binance writes <c>U</c> and <c>u</c> before <c>b</c> and <c>a</c>.
+/// at most once per <paramref name="fetchInterval"/>. Binance writes <c>U</c> and <c>u</c> before <c>b</c> and <c>a</c>.
 /// </summary>
-internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rules, int capacity, ILogger? logger)
+internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rules, int capacity, TimeSpan fetchInterval, ILogger? logger)
     : BookHandler(adapter, rules, capacity, logger)
 {
     /// <summary>More held events are released and holding starts over.</summary>
     public const int MaxHeld = 2_000;
-
-    /// <summary>The depth request with limit 5000 has a request weight of 250, so it is rare.</summary>
-    public static readonly TimeSpan FetchInterval = TimeSpan.FromSeconds(10);
 
     private readonly MessageBuffer[] _held = new MessageBuffer[MaxHeld];
     private int _heldCount;
@@ -62,7 +59,7 @@ internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rule
     public void StartFetch(long nowMs)
     {
         _phase = Phase.Fetching;
-        _nextFetchMs = nowMs + (long)FetchInterval.TotalMilliseconds;
+        _nextFetchMs = nowMs + (long)fetchInterval.TotalMilliseconds;
         Resyncs++;
     }
 

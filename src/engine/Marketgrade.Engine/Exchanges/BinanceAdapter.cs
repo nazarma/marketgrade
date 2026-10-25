@@ -59,7 +59,7 @@ public sealed class BinanceAdapter(Uri? uri = null, Uri? restUri = null) : Excha
     }
 
     public override BookHandler CreateBookHandler(PairRules rules, EngineOptions options, ILogger? logger = null) =>
-        new BinanceBookHandler(this, rules, options.BinanceBookCapacity, logger);
+        new BinanceBookHandler(this, rules, options.BinanceBookCapacity, options.BinanceResyncInterval, logger);
 
     public override MessageKind Classify(ReadOnlySpan<byte> message)
     {

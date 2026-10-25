@@ -1,10 +1,16 @@
+using Marketgrade.Engine.Books;
 using Marketgrade.Engine.Recording;
 
 namespace Marketgrade.Engine;
 
 /// <summary>Immutable snapshot of all exchanges, rebuilt once per status interval.</summary>
 /// <param name="Recording">Null when the engine runs without recording.</param>
-public sealed record EngineStatus(DateTime TimeUtc, IReadOnlyList<ExchangeStatus> Exchanges, RecordingStatus? Recording = null);
+/// <param name="ClockOffsetMs">How far the local clock is ahead of NTP time, or null if unknown (delays are then uncorrected).</param>
+public sealed record EngineStatus(
+    DateTime TimeUtc,
+    IReadOnlyList<ExchangeStatus> Exchanges,
+    RecordingStatus? Recording = null,
+    double? ClockOffsetMs = null);
 
 /// <param name="TodayBytes">Size on disk of the current UTC day's recordings, all exchanges.</param>
 /// <param name="TotalBytes">Size on disk of all recordings in the current folder.</param>
@@ -23,6 +29,11 @@ public sealed record RecordingStatus(
 /// <param name="BytesPerSecond">All message bytes.</param>
 /// <param name="MsSinceLastMessage">Time since the last message or connect, or null before the first connect.</param>
 /// <param name="ReconnectCount">Reconnects after failures; scheduled closes by the exchange are not counted.</param>
+/// <param name="BestBid">Best bid with the pair's decimals, or null while the book is not valid. Likewise <paramref name="BestAsk"/> and <paramref name="Spread"/>.</param>
+/// <param name="MaxBidLevels">The most levels the bid side ever held, for tuning the book capacity. Likewise <paramref name="MaxAskLevels"/>.</param>
+/// <param name="DelayP50Ms">Median delay from the exchange's timestamp to arrival over the last minute, clock-corrected when the offset is known; null without data.</param>
+/// <param name="ProcessingP50Ns">Median time to parse, apply and check one message over the last minute; null without data.</param>
+/// <param name="GapsToday">Times the book became invalid today (UTC).</param>
 public sealed record ExchangeStatus(
     int Id,
     string Name,
@@ -38,4 +49,18 @@ public sealed record ExchangeStatus(
     long HeartbeatMessages,
     long ControlMessages,
     long ErrorMessages,
-    long Bytes);
+    long Bytes,
+    BookState BookState = BookState.NoPairRules,
+    string? BestBid = null,
+    string? BestAsk = null,
+    string? Spread = null,
+    int BidLevels = 0,
+    int AskLevels = 0,
+    int MaxBidLevels = 0,
+    int MaxAskLevels = 0,
+    double? DelayP50Ms = null,
+    double? DelayP99Ms = null,
+    long? ProcessingP50Ns = null,
+    long? ProcessingP99Ns = null,
+    int GapsToday = 0,
+    BookGap? LastGap = null);

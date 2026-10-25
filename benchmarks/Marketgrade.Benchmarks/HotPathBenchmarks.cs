@@ -9,7 +9,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 namespace Marketgrade.Benchmarks;
 
 /// <summary>
-/// The whole per-message path: WebSocket receive, stamping, queueing, classifying and releasing.
+/// The whole per-message path: WebSocket receive, stamping, queueing, waking the book worker's thread,
+/// classifying and releasing. The worker has no pair rules here, so it keeps no book; the order book
+/// benchmarks measure parsing, applying and checking.
 /// With <see cref="Recording"/> the recorder is the second consumer and writes every message to disk
 /// (or drops it for the recorder when it falls behind). Real messages are replayed as WebSocket frames
 /// from memory, so only engine code is measured. Allocations are reported per message, on all threads;
@@ -22,10 +24,11 @@ public class HotPathBenchmarks
 
     private ReplayStream _stream = null!;
     private ExchangeConnection _connection = null!;
-    private StatsConsumer _consumer = null!;
+    private BookWorker _worker = null!;
     private Channel<MessageBuffer> _queue = null!;
+    private ChannelWriter<MessageBuffer> _writer = null!;
     private EngineMetrics _metrics = null!;
-    private Task _consumerTask = null!;
+    private HttpClient _http = null!;
     private Channel<MessageBuffer>? _recorderQueue;
     private RecordingManager? _recording;
     private Task? _recorderTask;
@@ -61,9 +64,10 @@ public class HotPathBenchmarks
         _queue = Channel.CreateBounded<MessageBuffer>(new BoundedChannelOptions(options.QueueCapacity)
         {
             SingleReader = true,
-            SingleWriter = true,
             FullMode = BoundedChannelFullMode.Wait,
         });
+        var signal = new ManualResetEventSlim();
+        _writer = new SignalingWriter(_queue.Writer, signal);
         var events = new ConnectionEventLog(200);
         if (Recording)
         {
@@ -72,14 +76,15 @@ public class HotPathBenchmarks
             _recorderQueue = Channel.CreateBounded<MessageBuffer>(new BoundedChannelOptions(options.RecorderQueueCapacity)
             {
                 SingleReader = true,
-                SingleWriter = true,
             });
             var recorder = _recording.AddRecorder(adapter);
             _recorderTask = Task.Run(() => recorder.RunAsync(_recorderQueue.Reader));
         }
-        _connection = new ExchangeConnection(adapter, pool, [_queue.Writer], options, events, _metrics, recorder: _recorderQueue?.Writer);
-        _consumer = new StatsConsumer(adapter);
-        _consumerTask = Task.Run(() => _consumer.RunAsync(_queue.Reader));
+        _connection = new ExchangeConnection(adapter, pool, [_writer], options, events, _metrics, recorder: _recorderQueue?.Writer);
+        _http = new HttpClient();
+        _worker = new BookWorker(adapter, _connection, _queue.Reader, signal, pool, _http, new ClockOffset(), options, events,
+            NullLogger.Instance, _metrics, _recorderQueue?.Writer);
+        _worker.Start(rules: null);
     }
 
     /// <summary>Moves the recorder to a new folder and deletes the one before, so the benchmark does not fill the disk.</summary>
@@ -101,8 +106,9 @@ public class HotPathBenchmarks
     [GlobalCleanup]
     public void Cleanup()
     {
-        _queue.Writer.Complete();
-        _consumerTask.Wait();
+        _writer.Complete();
+        _worker.Completion.Wait();
+        _http.Dispose();
         _recorderQueue?.Writer.Complete();
         _recorderTask?.Wait();
         if (Recording && Directory.Exists(_folder))
@@ -130,7 +136,7 @@ public class HotPathBenchmarks
     }
 
     private long Total() =>
-        _consumer.DataMessages + _consumer.HeartbeatMessages + _consumer.ControlMessages + _consumer.ErrorMessages;
+        _worker.DataMessages + _worker.HeartbeatMessages + _worker.ControlMessages + _worker.ErrorMessages;
 
     /// <summary>Server-to-client text frames (unmasked), cycling through the messages, then a close frame.</summary>
     private static byte[] BuildFrames(byte[][] messages)

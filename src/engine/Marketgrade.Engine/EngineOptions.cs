@@ -68,4 +68,12 @@ public sealed record EngineOptions
 
     /// <summary>Starting levels per side; a full side doubles. The REST snapshot has at most 5,000 per side.</summary>
     public int BinanceBookCapacity { get; init; } = 20_000;
+
+    /// <summary>Binance depth snapshots are fetched at most this often: one costs request weight 250.</summary>
+    public TimeSpan BinanceResyncInterval { get; init; } = TimeSpan.FromSeconds(10);
+
+    public TimeSpan BinanceSnapshotTimeout { get; init; } = TimeSpan.FromSeconds(10);
+
+    /// <summary>How often the book worker checks its connection, rotates statistics and publishes them while no message arrives.</summary>
+    public TimeSpan BookHousekeepingInterval { get; init; } = TimeSpan.FromMilliseconds(250);
 }

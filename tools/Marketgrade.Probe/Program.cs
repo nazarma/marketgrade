@@ -1,4 +1,5 @@
 using Marketgrade.Engine;
+using Marketgrade.Engine.Books;
 using Marketgrade.Engine.Exchanges;
 using Marketgrade.Engine.Recording;
 using Marketgrade.Probe;
@@ -54,7 +55,20 @@ if (recordDirectory is not null)
 {
     Console.WriteLine($"Recording to {recordDirectory}");
 }
-engine.Start();
+var rules = new List<PairRules>();
+foreach (var adapter in adapters)
+{
+    using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+    try
+    {
+        rules.Add(await engine.FetchPairRulesAsync(adapter, timeout.Token));
+    }
+    catch (Exception e) when (e is HttpRequestException or OperationCanceledException or FormatException or System.Text.Json.JsonException)
+    {
+        Console.WriteLine($"{adapter.Name}: no pair rules, no book ({e.Message})");
+    }
+}
+engine.Start(rules);
 var started = DateTime.UtcNow;
 var printed = 0;
 for (var elapsed = interval; elapsed <= seconds; elapsed += interval)
