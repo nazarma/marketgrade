@@ -144,11 +144,7 @@ internal sealed class Recorder
             }
             else
             {
-                _skipped.Add(buffer.GapFirstSeq, buffer.GapLastSeq, buffer.GapCount);
-                if (buffer.Type == RecordType.Message)
-                {
-                    _skipped.Add(buffer.Seq);
-                }
+                Skip(buffer);
             }
         }
         catch (Exception e) when (e is IOException or UnauthorizedAccessException)
@@ -158,6 +154,15 @@ internal sealed class Recorder
         finally
         {
             buffer.Release();
+        }
+    }
+
+    private void Skip(MessageBuffer buffer)
+    {
+        _skipped.Add(buffer.GapFirstSeq, buffer.GapLastSeq, buffer.GapCount);
+        if (buffer.Type == RecordType.Message)
+        {
+            _skipped.Add(buffer.Seq);
         }
     }
 
@@ -244,15 +249,23 @@ internal sealed class Recorder
     private void Write(MessageBuffer buffer)
     {
         var hour = buffer.ArrivalUnixNs / RecordingFiles.NsPerHour;
-        if (_file is null)
+        try
         {
-            Open(hour);
+            if (_file is null)
+            {
+                Open(hour);
+            }
+            else if (hour > _fileHour)
+            {
+                // Forward only: if the clock moved back, records stay in the current file.
+                Close();
+                Open(hour);
+            }
         }
-        else if (hour > _fileHour)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            // Forward only: if the clock moved back, records stay in the current file.
-            Close();
-            Open(hour);
+            Skip(buffer);
+            throw;
         }
 
         // Ranges first, so a failed write moves everything in the buffer back to the skipped range.
@@ -304,7 +317,11 @@ internal sealed class Recorder
         {
             WriteToFile(_buffer.AsSpan(0, _buffered));
             _buffered = 0;
-            _failed = false;
+            if (_failed && _writing)
+            {
+                _failed = false;
+                SetState(RecordingState.Recording);
+            }
         }
         _unflushed.Clear();
     }
@@ -411,14 +428,18 @@ internal sealed class Recorder
             _file = null;
             Volatile.Write(ref _filePath, null);
         }
+        // Retries that fail the same way are not logged again.
+        if (!_failed || e.Message != _lastError)
+        {
+            _manager.Events.Add(_adapter.Name, "Recording error", e.Message);
+            _manager.Logger.LogWarning("{Exchange}: recording failed, retrying every {Delay}: {Error}",
+                _adapter.Name, _manager.Options.RecordingRetryDelay, e.Message);
+        }
         _writing = false;
         _failed = true;
         _failedAt = _manager.Time.GetTimestamp();
         Volatile.Write(ref _lastError, e.Message);
         SetState(RecordingState.Error);
-        _manager.Events.Add(_adapter.Name, "Recording error", e.Message);
-        _manager.Logger.LogWarning("{Exchange}: recording failed, retrying in {Delay}: {Error}",
-            _adapter.Name, _manager.Options.RecordingRetryDelay, e.Message);
     }
 
     private void SetState(RecordingState state) => Volatile.Write(ref _state, (int)state);

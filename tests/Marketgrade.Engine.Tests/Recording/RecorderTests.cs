@@ -108,6 +108,34 @@ public class RecorderTests
     }
 
     [Fact]
+    public void Write_error_is_retried_after_a_delay_and_the_missed_messages_become_a_gap()
+    {
+        var harness = new RecorderHarness();
+        // A file where the recordings folder should be: nothing can be written until it is gone.
+        File.WriteAllText(harness.RecordingsFolder, "");
+
+        harness.Write(harness.Buffer(1, "fails", s_t0), harness.Buffer(2, "skipped", s_t0));
+
+        Assert.Equal(RecordingState.Error, harness.Recorder.State);
+        Assert.NotNull(harness.Recorder.LastError);
+        Assert.Single(harness.Events.GetRecent(10), e => e.Event == "Recording error");
+
+        File.Delete(harness.RecordingsFolder);
+        harness.Write(harness.Buffer(3, "still waiting for the retry", s_t0));
+        Assert.Null(harness.Recorder.ActiveFile);
+
+        harness.Time.Advance(harness.Manager.Options.RecordingRetryDelay);
+        harness.Write(harness.Buffer(4, "after the retry", s_t0));
+        harness.Close();
+
+        Assert.Equal(RecordingState.Recording, harness.Recorder.State);
+        var records = TestRecordings.Read(harness.PathFor(s_t0));
+        Assert.Equal([RecordType.Gap, RecordType.Message], records.Select(r => r.Type));
+        Assert.Equal((1, 3, 3), RecordFormat.ReadGapPayload(records[0].Payload));
+        Assert.Equal(harness.Pool.Created, harness.Pool.Available);
+    }
+
+    [Fact]
     public async Task Quiet_period_still_flushes_on_the_write_interval()
     {
         var harness = new RecorderHarness(s => s with { WriteInterval = TimeSpan.FromSeconds(2) });
