@@ -6,8 +6,11 @@ large order) and market maker performance against agreed targets. The first rele
 Kraken, Coinbase and Binance.
 
 **Status: early development.** The engine connects to Kraken, Coinbase and Binance, reconnects when a
-connection dies, and records every message to compressed hourly files. The desktop window shows each
-exchange's state and messages per second, and the Settings screen controls recording.
+connection dies, and records every message to compressed hourly files. It keeps a live order book per
+exchange, checks every update with the exchange's own method (checksum, sequence numbers or update
+IDs), repairs a broken book by itself, and measures delay and processing time. The desktop window
+shows each exchange's state, book, best prices, delay and gaps, and the Settings screen controls
+recording.
 
 ## Prerequisites
 
@@ -62,7 +65,16 @@ on macOS) unless changed in Settings. The reader tool prints, checks and summari
 dotnet run --project tools/Marketgrade.Reader -- cat <file> --limit 20 --payload
 dotnet run --project tools/Marketgrade.Reader -- verify <folder>
 dotnet run --project tools/Marketgrade.Reader -- stats <folder>
+dotnet run --project tools/Marketgrade.Reader -- replay <file or folder>
+dotnet run --project tools/Marketgrade.Reader -- trim <file> <out.mgrec.zst> --seconds 60
 ```
+
+`replay` rebuilds every exchange's order book from the recordings with the same code the app uses and
+reports, per exchange, the messages applied, the checksum, sequence and parse failures, the snapshots
+applied, the most levels per side and the time range. Each failure is listed with whether the live
+book failed at the same place (a `BookReset` record follows it); the command exits with code 1 if
+any failure has no such match. `trim` copies the first seconds of a recording into a small compressed
+file, as used for the test fixtures in `tests/Marketgrade.Engine.Tests/Fixtures/replay`.
 
 Engine metrics while the app runs (install once with `dotnet tool install -g dotnet-counters`):
 

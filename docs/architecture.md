@@ -63,9 +63,9 @@ each consumer. Each consumer releases the buffer as its last action; the last re
 the pool. After startup, receiving, stamping, queueing, classifying, recording and releasing allocate
 nothing per message, which the benchmarks check.
 
-**Queues.** Every consumer has its own bounded queue per exchange (one reader, one writer): the stats
-consumer, which counts messages by kind, and the recorder (see Recording). A full stats queue (8,192
-messages) makes the connection wait instead of dropping messages. The recorder's queue is never waited
+**Queues.** Every consumer has its own bounded queue per exchange with one reader: the book worker,
+which counts messages by kind and keeps the order book (see Order books), and the recorder (see
+Recording). A full book queue (8,192 messages) makes the connection wait instead of dropping messages. The recorder's queue is never waited
 on. A warning is logged when a queue is more than 80% full.
 
 **Dead connections and reconnects.** A watchdog checks every second and aborts a connection that has
@@ -92,13 +92,13 @@ and `connection_state`, all tagged by exchange.
 Every message from every exchange is written, exactly as received, to binary files in the recordings
 folder. The format is described in [recording-format.md](recording-format.md).
 
-**Consumer.** Each exchange has one recorder, a second consumer next to the stats consumer, with its
+**Consumer.** Each exchange has one recorder, a second consumer next to the book worker, with its
 own queue of 2,048 messages. Every queued message holds a 16 KB pool buffer, so a stalled disk costs at
 most about 32 MB per exchange; at a busy Coinbase rate of about 100 messages per second that still
 covers about 20 seconds of stall.
 A larger queue would survive longer stalls but hold proportionally more memory.
 
-**Drop policy.** Recording must never slow live monitoring. The connection waits on the stats queue but
+**Drop policy.** Recording must never slow live monitoring. The connection waits on the book queue but
 only calls `TryWrite` on the recorder's queue. If that fails, the connection releases the buffer once
 on the recorder's behalf (so it still returns to the pool), counts it in `recording_dropped`, and adds
 its sequence number to a gap it keeps itself. The gap is stamped onto the next record that fits in the
@@ -178,6 +178,149 @@ takes 170 to 220 ns per message with 0 bytes allocated, about 0.7 GB/s of Kraken
 1.0 to 1.1 GB/s of Coinbase and Binance messages into the operating system's file cache. The whole
 hot path with recording stays at 0 bytes allocated per message.
 
+## Order books
+
+Each exchange has a live in-memory order book, checked after every message with the exchange's own
+method and repaired by itself when a check fails.
+
+**Pair rules.** Books store prices and amounts as `long` values scaled by the pair's decimals, so
+`80368.5` with 2 price decimals is `8036850`. The decimals come from each exchange's public REST API
+when the backend starts: Kraken `AssetPairs` (`pair_decimals`, `lot_decimals`), the Coinbase public
+product endpoint (decimals of `price_increment` and `base_increment`) and Binance `exchangeInfo`
+(decimals of the `PRICE_FILTER` tick size and the `LOT_SIZE` step size). For BTC they are 1 and 8 on
+Kraken, 2 and 8 on Coinbase, 2 and 5 on Binance. The fetch runs in the background, so the backend is
+ready at once; every fetched set is saved in SQLite, and an exchange that cannot be reached starts
+with its cached rules, so the books also work offline. An exchange with neither has state
+`NoPairRules`: its connection and recording run, but it keeps no book.
+
+**Parsing.** Messages are read with `Utf8JsonReader` straight into book changes, with no intermediate
+objects. Decimal text (a JSON string, or a JSON number for Kraken) becomes a scaled `long`; more
+decimals than the pair has are accepted only if they are zeros (Binance sends amounts with 8 decimals
+for a step of 5). Signs, exponents and values that do not fit are parse errors, which make the book
+invalid like a failed check. Exchange timestamps are parsed from ISO 8601 text (Kraken, Coinbase) or
+milliseconds (Binance). Each handler relies on the property order the exchanges send (Kraken `type`
+before `data`, Binance `U` and `u` before the levels); a message in another order is a parse error,
+which fails safe and shows in the replay counts.
+
+**Storage.** Each side is two `long[]` arrays (prices, amounts) and a count, sorted so that the best
+level is the last element: almost every change is near the best price, so inserting or deleting by
+shifting moves only the few levels above it. Ask prices are stored negated, which puts the lowest ask
+last and lets both sides share one binary search. A full side doubles and logs a warning with its new
+size. Starting capacities are 2,000 levels per side for Kraken (we keep 1,000; an update can add a few
+before the cut), 50,000 for Coinbase and 20,000 for Binance (both in `EngineOptions`). The most levels
+each side ever held is tracked and reported for tuning these defaults.
+
+**Book worker.** The book worker replaces step 3's stats consumer: it still classifies and counts
+every message, and it also parses, applies and checks it, records the statistics and releases the
+buffer last. Each exchange has one, on its own background thread `book-<exchange>`. When its queue is
+empty it waits on a `ManualResetEventSlim` that the connection sets after every write, through a
+small `ChannelWriter` wrapper, and then drains everything queued. A manual reset event fits better
+than a semaphore: setting an event that is already set is almost free, one wake drains the whole
+queue (a semaphore needs a lock per message on both sides and its count grows), it spins briefly
+before blocking, so it wakes quickly, and waiting allocates nothing. The wait times out every 250 ms
+for housekeeping: statistics, connection checks, Binance snapshots and book snapshots. Parsing,
+applying, checking, statistics and releasing allocate nothing per message.
+
+**Checks and repair.**
+
+| Exchange | Snapshot from | Check after every message | Repair |
+| -------- | ------------- | ------------------------- | ------ |
+| Kraken   | WebSocket `book` (depth 1000) | CRC32 of the top 10 levels per side | reconnect, new snapshot |
+| Coinbase | WebSocket `level2` snapshot event | `sequence_num` is the previous one + 1 | reconnect, new snapshot |
+| Binance  | REST `GET /api/v3/depth?limit=5000` | update ID chain (`U`, `u`) | new REST snapshot, same connection |
+
+- Kraken: a snapshot replaces the book. After every message both sides are cut to 1,000 levels,
+  because Kraken sends no removal for levels that fall out of range, and the checksum must match.
+  The checksum text is each level's price and quantity at the pair's full precision without the
+  decimal point and leading zeros, asks first, best first, and that is exactly the decimal digits of
+  our scaled values. It is built in a `stackalloc` buffer and hashed with `System.IO.Hashing.Crc32`.
+  Kraken's documented example (checksum 3310070434) is a unit test.
+- Coinbase: `sequence_num` counts every message of a connection, whatever its channel. Measured on a
+  step 3 recording: 1,497 messages on one connection (1,420 `level2`, 75 heartbeats, 2 subscriptions)
+  numbered 0 to 1,496 with no break; `level2` messages alone jump 76 times. The Coinbase docs disagree
+  on this (the level2 page says per connection, the overview says per product). So every message,
+  heartbeats included, must carry the previous number plus one, and the first number of a connection
+  is its start.
+- Binance follows its documented algorithm. While a snapshot is fetched, diff events are held in their
+  pooled buffers (at most 2,000; beyond that they are released and holding starts over). The snapshot
+  replaces the book, held and new events with `u <= lastUpdateId` are dropped, and the first event
+  applied must have `U <= lastUpdateId + 1 <= u`. After that an event with `u` at or below the book's
+  ID is ignored, and one with `U` above the book's ID + 1 means events were missed. Snapshots come from
+  the market-data host `data-api.binance.vision` at most once every 10 seconds, because one costs
+  request weight 250. HTTP 429 and 418 are respected: the next fetch waits for `Retry-After`, and the
+  wait is logged and shown as an event. Events are only held while a fetch is running, so a long
+  back-off never ties up pool buffers. Every snapshot response is recorded as a `Snapshot` record,
+  so a replay can rebuild Binance books.
+
+**Gaps.** When a check fails the book becomes `Invalid` and a gap opens, with its start time, cause
+(including the numbers involved, such as expected and received sequence numbers) and our sequence
+number. The worker logs a warning, adds a "Book invalid" event and writes a `BookReset` record, then
+asks for the repair: `ExchangeConnection.RequestReconnect` for Kraken and Coinbase (thread-safe; it
+uses the normal reconnect delays, so a bug can never cause a reconnect storm) or a new snapshot for
+Binance. Messages of the broken connection are skipped. Once a new snapshot is applied and checked
+the book is `Valid` again, and the gap gets its end time and duration ("Book valid" event). A valid
+book also becomes invalid when its connection is lost or replaced, because it missed whatever
+happened in between; stopping the app is not a gap. Gaps are counted per UTC day. When the
+recorder's queue is full, a `Snapshot` or `BookReset` record is dropped, counted with the dropped
+messages and logged; the replay then reports the Binance range as missing a snapshot.
+
+**Delay and clock offset.** Delay is the arrival time minus the exchange's timestamp of the message
+(Kraken `timestamp`, Coinbase's envelope `timestamp`, Binance `E`), minus the clock offset. The
+backend measures the offset with a small SNTP client (UDP port 123, `time.apple.com`, then
+`pool.ntp.org`) at start and every 10 minutes, and passes it to the engine; the offset is the local
+clock minus NTP time. Without an answer the offset is unknown, delays are shown uncorrected with a
+warning, and the next attempt is after a minute; an offset above 50 ms is shown with a warning too.
+Processing time is measured with `Stopwatch.GetTimestamp()` from before parsing to after the check.
+
+**Statistics.** Delay and processing time each go into a log-linear histogram per exchange: exact up to
+63 ns, then 64 buckets per power of two, so a percentile is within 1.6 % of the true value; the arrays
+are allocated once. A ring of six 10-second histograms covers the last minute (50 to 60 seconds). Once
+per second the worker merges the ring and publishes the median and 99th percentile. A negative delay
+(the clocks disagree) counts as 0.
+
+**Status and API.** `GET /engine/status` adds per exchange: book state (`NoPairRules`, `Syncing`,
+`Valid`, `Invalid`), best bid, best ask and spread (text with the pair's decimals), level counts and
+the most seen, delay median and 99th percentile in milliseconds, processing median and 99th
+percentile in nanoseconds, gaps today and the last gap; and the clock offset for the whole engine.
+`GET /books/{exchange}?levels=20` returns up to 100 best levels per side as `[price, amount]` strings,
+from an immutable copy the worker publishes by swapping a reference, so readers never lock. Copies
+are published at most 10 times per second and only while someone has read one in the last
+5 seconds, so nothing is allocated while the endpoint is not used; the first read after a quiet
+period may get an older copy (it carries its time) or HTTP 503 before the first one.
+
+**Replay.** `Marketgrade.Reader replay` feeds recorded records through the same handlers, single-
+threaded: a `ConnectionOpened` record starts a new book, a `Snapshot` record rebuilds a Binance book,
+and a recorded `Gap` waits for the next snapshot. It reports the checks per exchange and matches every
+failure with the live book's `BookReset` records. A Binance replay that waits more than 20 seconds of
+recorded time for a snapshot (longer than the 10-second limit plus the 10-second fetch timeout) reports
+that range as missing a snapshot instead of counting failures. A recorded minute per exchange is
+replayed in the tests.
+
+**Measured.**
+
+On the development machine (Intel Core i7-9750H), with 500 real messages after the first valid
+book of each exchange's recorded minute, BenchmarkDotNet medians per message, all with 0 bytes
+allocated:
+
+| Exchange | Parse, apply, check | Whole worker path |
+| -------- | ------------------: | ----------------: |
+| Kraken   |              4.0 µs |            2.4 µs |
+| Coinbase |              6.9 µs |            7.0 µs |
+| Binance  |              9.4 µs |            9.5 µs |
+
+The whole worker path adds classifying, statistics and the release; Kraken's numbers vary between
+runs (standard deviation about 1.4 µs). Parsing one decimal takes 27 ns, one ISO 8601 timestamp 35 ns,
+and the Kraken checksum 400 ns. Receiving, queueing, waking the worker, classifying and releasing a
+message (the hot path benchmark, without a book) stay at 530 to 600 ns, 680 to 820 ns with recording.
+
+Live, during a 90-second probe run (October 2026, a quiet night), the medians were higher: 7 µs on
+Kraken, 43 µs on Coinbase and 45 µs on Binance. Most of the difference is changes far from the best
+price, which shift most of a 20,000-level side, and colder caches after the worker sleeps. The most
+levels per side were 1,001 on Kraken (1,000 after the cut), 19,617 bids and 20,913 asks on Coinbase,
+and 5,217 bids and 5,005 asks on Binance (its snapshot has 5,000 per side, and the book grows from
+there), well within the starting capacities. The live books and their replays held exactly the same
+number of levels.
+
 ## Storage
 
 **Data folder.** Tauri passes the operating system's app data folder (for example
@@ -187,7 +330,8 @@ the probe tool and tests, the backend uses `Marketgrade` in the local applicatio
 
 **Settings.** Settings live in SQLite at `<data folder>/marketgrade.db`, accessed with
 `Microsoft.Data.Sqlite` (no Entity Framework): one table `settings(key, value, updated_at)` with one
-row per section and its values as JSON. The schema version is `PRAGMA user_version`, and migrations
+row per section and its values as JSON, and `pair_rules(exchange_id, symbol, price_decimals,
+amount_decimals, updated_at)` with the last pair rules fetched from each exchange (see Order books). The schema version is `PRAGMA user_version`, and migrations
 are an ordered list applied at startup. `GET /settings/recording` returns the values and the defaults;
 `PUT /settings/recording` validates, saves and applies them, or returns an error per field (HTTP 400).
 
