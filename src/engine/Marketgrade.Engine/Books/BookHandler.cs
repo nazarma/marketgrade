@@ -85,8 +85,12 @@ public abstract class BookHandler
         ResetCore();
     }
 
-    /// <summary>Marks the book invalid from outside, for example when the connection is lost.</summary>
-    public void Invalidate() => Book.State = BookState.Invalid;
+    /// <summary>Marks the book invalid from outside, for example when the connection is lost; it then rebuilds as after a failure.</summary>
+    public void Invalidate()
+    {
+        Book.State = BookState.Invalid;
+        OnFailed();
+    }
 
     /// <summary>Called on a new connection; the default clears the book and waits for a snapshot.</summary>
     protected virtual void ResetCore()

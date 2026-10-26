@@ -79,6 +79,19 @@ public class BinanceBookHandlerTests
     }
 
     [Fact]
+    public void Book_invalidated_from_outside_waits_for_a_new_snapshot()
+    {
+        Sync(lastUpdateId: 100);
+
+        _handler.Invalidate();
+
+        // A message of the lost connection still in the queue must not make the book valid again.
+        Assert.Equal(HandleOutcome.Ignored, Handle(Event(102, 105)));
+        Assert.Equal(BookState.Invalid, _handler.Book.State);
+        Assert.True(_handler.NeedsSnapshot);
+    }
+
+    [Fact]
     public void Old_and_overlapping_events_follow_the_documented_rule()
     {
         Sync(lastUpdateId: 100);
