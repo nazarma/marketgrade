@@ -183,16 +183,25 @@ internal sealed class BookWorker
         return Volatile.Read(ref _snapshot);
     }
 
+    /// <summary>The book's handler, for benchmarks that drive <see cref="Process"/> themselves.</summary>
+    internal BookHandler? Handler => _handler;
+
     /// <summary>Starts the worker thread; without rules the exchange keeps no book and only counts messages.</summary>
     public void Start(PairRules? rules)
+    {
+        Prepare(rules);
+        _thread = new Thread(Run) { IsBackground = true, Name = $"book-{_adapter.Name.ToLowerInvariant()}" };
+        _thread.Start();
+    }
+
+    /// <summary>Creates the book's handler without starting the thread.</summary>
+    internal void Prepare(PairRules? rules)
     {
         if (rules is not null)
         {
             _handler = _adapter.CreateBookHandler(rules, _options, _logger);
         }
         Volatile.Write(ref _state, (int)(_handler is null ? BookState.NoPairRules : BookState.Syncing));
-        _thread = new Thread(Run) { IsBackground = true, Name = $"book-{_adapter.Name.ToLowerInvariant()}" };
-        _thread.Start();
     }
 
     private void Run()
