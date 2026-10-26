@@ -52,6 +52,9 @@ internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rule
     /// <summary>Times more than <see cref="MaxHeld"/> events piled up and the held ones were released.</summary>
     public long HeldOverflows { get; private set; }
 
+    /// <summary>Held events the last <see cref="OnSnapshot"/> applied.</summary>
+    public int HeldApplied { get; private set; }
+
     /// <summary>True when a snapshot is needed and the rate limit allows a fetch at <paramref name="nowMs"/>.</summary>
     public bool ShouldFetch(long nowMs) => _phase == Phase.NeedsSnapshot && nowMs >= _nextFetchMs;
 
@@ -94,6 +97,7 @@ internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rule
             var outcome = HandleOutcome.Ignored;
             var count = _heldCount;
             _heldCount = 0;
+            HeldApplied = 0;
             for (var i = 0; i < count; i++)
             {
                 var held = _held[i];
@@ -103,6 +107,10 @@ internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rule
                     if (outcome != HandleOutcome.Failed)
                     {
                         var result = HandleEvent(held);
+                        if (result is HandleOutcome.Synced or HandleOutcome.Applied)
+                        {
+                            HeldApplied++;
+                        }
                         if (result is HandleOutcome.Synced or HandleOutcome.Failed)
                         {
                             outcome = result;

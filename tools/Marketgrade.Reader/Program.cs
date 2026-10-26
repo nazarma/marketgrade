@@ -1,12 +1,19 @@
 using System.Globalization;
 using System.Text;
+using Marketgrade.Engine;
+using Marketgrade.Engine.Books;
+using Marketgrade.Engine.Exchanges;
 using Marketgrade.Engine.Recording;
+using ZstdSharp;
 
 // Reads recording files (.mgrec and .mgrec.zst).
 //   dotnet run --project tools/Marketgrade.Reader -- cat <file> [--limit N] [--payload]
 //   dotnet run --project tools/Marketgrade.Reader -- verify <file or folder>
 //   dotnet run --project tools/Marketgrade.Reader -- stats <folder>
-const string Usage = "Usage: cat <file> [--limit N] [--payload] | verify <file or folder> | stats <folder>";
+//   dotnet run --project tools/Marketgrade.Reader -- replay <file or folder>
+//   dotnet run --project tools/Marketgrade.Reader -- trim <file> <out.mgrec.zst> --seconds N
+const string Usage = "Usage: cat <file> [--limit N] [--payload] | verify <file or folder> | stats <folder> | replay <file or folder> "
+    + "| trim <file> <out.mgrec.zst> --seconds N";
 
 if (args.Length < 2)
 {
@@ -39,6 +46,10 @@ switch (args[0])
         return Verify(args[1]);
     case "stats":
         return Stats(args[1]);
+    case "replay":
+        return await ReplayAsync(args[1]);
+    case "trim" when args.Length == 5 && args[3] == "--seconds":
+        return Trim(args[1], args[2], double.Parse(args[4], CultureInfo.InvariantCulture));
     default:
         Console.Error.WriteLine(Usage);
         return 2;
@@ -154,6 +165,119 @@ static int Stats(string folder)
         }
     }
     return errors == 0 ? 0 : 1;
+}
+
+// Rebuilds each exchange's book from its recordings and reports the checks; exits with 1 on a failure
+// the live book did not have too (no BookReset record right after it).
+static async Task<int> ReplayAsync(string target)
+{
+    var files = File.Exists(target)
+        ? RecordingFiles.TryParse(Path.GetFullPath(target), out var single) ? [single] : throw new ArgumentException($"{target} is not in the recordings folder layout")
+        : RecordingFiles.Enumerate(target);
+    var unexplained = 0;
+    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+    foreach (var exchange in files.GroupBy(f => f.Exchange).OrderBy(g => g.Key))
+    {
+        var adapter = ExchangeAdapters.CreateDefault().FirstOrDefault(a => a.Name.Equals(exchange.Key, StringComparison.OrdinalIgnoreCase));
+        if (adapter is null)
+        {
+            Console.WriteLine($"{exchange.Key}: unknown exchange, skipped");
+            continue;
+        }
+        var rules = await RulesAsync(http, adapter);
+        var replay = new BookReplay(adapter, rules);
+        foreach (var file in exchange.OrderBy(f => f.Hour).ThenBy(f => f.Part))
+        {
+            using var reader = RecordingReader.Open(file.Path);
+            replay.Read(reader);
+            if (reader.Error is not null)
+            {
+                Console.Error.WriteLine($"{file.Path}: {reader.Error}");
+            }
+        }
+        replay.Finish();
+        unexplained += replay.UnexplainedFailures;
+
+        var failures = replay.Failures;
+        Console.WriteLine($"{adapter.Name} ({rules.PriceDecimals} price and {rules.AmountDecimals} amount decimals)");
+        Console.WriteLine($"  time       {Time(replay.FirstUnixNs)} to {Time(replay.LastUnixNs)}");
+        Console.WriteLine($"  messages   {replay.Messages} replayed, {replay.Applied} applied, {replay.Syncs} snapshots applied and checked");
+        Console.WriteLine($"  failures   {failures.Count(f => f.Kind == FailureKind.Checksum)} checksum, {failures.Count(f => f.Kind == FailureKind.Sequence)} sequence, "
+            + $"{failures.Count(f => f.Kind == FailureKind.Parse)} parse; {replay.UnexplainedFailures} without a live book reset");
+        Console.WriteLine($"  live       {replay.LiveResets.Count} book resets, {replay.RecordingGaps} recording gaps");
+        Console.WriteLine($"  levels     at most {replay.Book.Bids.MaxCount} bids and {replay.Book.Asks.MaxCount} asks");
+        foreach (var failure in failures)
+        {
+            Console.WriteLine($"  {(failure.Explained ? "failure  " : "UNEXPLAINED")} {Time(failure.ArrivalUnixNs)} seq {failure.Seq} conn {failure.ConnectionId}: {failure.Cause}");
+        }
+        foreach (var reset in replay.LiveResets)
+        {
+            Console.WriteLine($"  live reset {Time(reset.ArrivalUnixNs)} seq {reset.Seq} conn {reset.ConnectionId}: {reset.Reason}");
+        }
+        foreach (var missing in replay.MissingSnapshots)
+        {
+            Console.WriteLine($"  missing snapshot {Time(missing.FromUnixNs)} to {Time(missing.ToUnixNs)}: {missing.Events} events not replayed");
+        }
+    }
+    return unexplained == 0 ? 0 : 1;
+}
+
+// The rules the app uses, from the exchange; offline, the values last seen when this tool was written.
+static async Task<PairRules> RulesAsync(HttpClient http, ExchangeAdapter adapter)
+{
+    try
+    {
+        return await PairRulesClient.FetchAsync(http, adapter, CancellationToken.None);
+    }
+    catch (Exception e) when (e is HttpRequestException or TaskCanceledException or FormatException or System.Text.Json.JsonException)
+    {
+        var known = adapter.Id switch
+        {
+            1 => new PairRules(1, adapter.Pair, 1, 8),
+            2 => new PairRules(2, adapter.Pair, 2, 8),
+            _ => new PairRules(3, adapter.Pair, 2, 5),
+        };
+        Console.Error.WriteLine($"{adapter.Name}: pair rules could not be fetched ({e.Message}), using {known.PriceDecimals}/{known.AmountDecimals}");
+        return known;
+    }
+}
+
+// Copies the first N seconds of a recording into a new file compressed at zstd level 19, for test fixtures.
+static int Trim(string path, string output, double seconds)
+{
+    using var reader = RecordingReader.Open(path);
+    if (!reader.HasHeader)
+    {
+        Console.Error.WriteLine($"{path}: {reader.Error}");
+        return 1;
+    }
+    using var raw = new MemoryStream();
+    var header = new byte[RecordFormat.FileHeaderSize(reader.Header.ExchangeName)];
+    RecordFormat.WriteFileHeader(header, reader.Header.ExchangeId, reader.Header.ExchangeName, reader.Header.CreatedUnixNs);
+    raw.Write(header);
+    long first = 0, records = 0;
+    var recordHeader = new byte[RecordFormat.RecordHeaderSize];
+    while (reader.Read())
+    {
+        var r = reader.Current;
+        first = first == 0 ? r.ArrivalUnixNs : first;
+        if (r.ArrivalUnixNs - first > seconds * 1e9)
+        {
+            break;
+        }
+        RecordFormat.WriteRecordHeader(recordHeader, r.Type, reader.Payload, r.Seq, r.ArrivalUnixNs, r.ConnectionId);
+        raw.Write(recordHeader);
+        raw.Write(reader.Payload);
+        records++;
+    }
+    using (var file = File.Create(output))
+    using (var compressor = new CompressionStream(file, level: 19))
+    {
+        raw.Position = 0;
+        raw.CopyTo(compressor);
+    }
+    Console.WriteLine($"{output}: {records} records, {raw.Length:N0} bytes, {new FileInfo(output).Length:N0} compressed");
+    return 0;
 }
 
 static (long Records, long Length, string? Error) Scan(string path)
