@@ -133,6 +133,29 @@ public class BookWorkerTests
     }
 
     [Fact]
+    public async Task Book_snapshots_are_published_once_someone_reads_them()
+    {
+        using var exchange = new FakeBinance();
+        await using var server = await FakeExchangeServer.StartAsync(exchange.StreamAsync);
+        await using var engine = new MarketEngine(s_fast, [new BinanceAdapter(server.Uri, new Uri("https://rest.test/"))],
+            httpHandler: new StubHttpHandler(exchange.SnapshotAsync));
+        engine.Start([s_binance]);
+        await WaitUntilAsync(() => engine.Status.Exchanges[0].BookState == BookState.Valid);
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        Assert.Null(engine.GetBook("BINANCE"));
+
+        await WaitUntilAsync(() => engine.GetBook("binance") is not null);
+
+        var book = engine.GetBook("binance")!;
+        Assert.Equal(("Binance", "BTCUSDT", BookState.Valid), (book.Exchange, book.Pair, book.State));
+        Assert.Equal([10000L, 9900L], book.BidPrices);
+        Assert.Equal([10050L, 10100L], book.AskPrices);
+        Assert.Equal(200_000L, book.AskAmounts[0]);
+        Assert.Null(engine.GetBook("nope"));
+        Assert.True(engine.HasExchange("Binance"));
+    }
+
+    [Fact]
     public async Task Binance_backs_off_after_http_429()
     {
         using var exchange = new FakeBinance();

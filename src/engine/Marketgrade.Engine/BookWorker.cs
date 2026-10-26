@@ -56,6 +56,9 @@ internal sealed class BookWorker
     private long _lastRecordingWarning = LogThrottle.Never;
     private BookGap? _openGap;
     private DateOnly _gapDay;
+    private long _version;
+    private long _publishedVersion = -1;
+    private long _nextPublish;
 
     // Written by this worker, read by the status loop.
     private long _dataMessages;
@@ -78,6 +81,8 @@ internal sealed class BookWorker
     private long _processingP99;
     private int _gapsToday;
     private BookGap? _lastGap;
+    private long _lastRead = long.MinValue;
+    private BookSnapshot? _snapshot;
 
     // Handed over by the snapshot fetch task.
     private Task? _fetch;
@@ -168,6 +173,16 @@ internal sealed class BookWorker
 
     public BookGap? LastGap => Volatile.Read(ref _lastGap);
 
+    /// <summary>
+    /// The latest published copy of the best levels, or null before the first one. Reading it keeps the worker
+    /// publishing for the next 5 seconds, so the first read after a quiet period may get an older copy.
+    /// </summary>
+    public BookSnapshot? ReadSnapshot()
+    {
+        Interlocked.Exchange(ref _lastRead, _time.GetTimestamp());
+        return Volatile.Read(ref _snapshot);
+    }
+
     /// <summary>Starts the worker thread; without rules the exchange keeps no book and only counts messages.</summary>
     public void Start(PairRules? rules)
     {
@@ -240,6 +255,10 @@ internal sealed class BookWorker
             _lastSeq = buffer.Seq;
             outcome = _handler.Handle(buffer);
             kind = _handler.Kind;
+            if (outcome is HandleOutcome.Applied or HandleOutcome.Synced or HandleOutcome.Failed)
+            {
+                _version++;
+            }
             if (outcome == HandleOutcome.Synced)
             {
                 Repaired();
@@ -312,6 +331,23 @@ internal sealed class BookWorker
         {
             SyncBinance(binance, now);
         }
+        PublishSnapshot(now);
+    }
+
+    /// <summary>At most 10 times per second, only while read in the last 5 seconds and only if the book changed.</summary>
+    private void PublishSnapshot(long now)
+    {
+        var lastRead = Interlocked.Read(ref _lastRead);
+        if (lastRead == long.MinValue
+            || now - lastRead > _time.TimestampFrequency * 5
+            || now < _nextPublish
+            || _version == _publishedVersion)
+        {
+            return;
+        }
+        _nextPublish = now + _time.TimestampFrequency / 10;
+        _publishedVersion = _version;
+        Volatile.Write(ref _snapshot, BookSnapshot.From(_handler!.Book, _adapter.Name, _adapter.Pair, _time.GetUtcNow().UtcDateTime));
     }
 
     /// <summary>The first message of a new connection: a valid book has missed whatever happened in between.</summary>
@@ -332,6 +368,7 @@ internal sealed class BookWorker
     private void Invalid(string cause, long seq, long connectionId, bool reconnect)
     {
         Volatile.Write(ref _state, (int)BookState.Invalid);
+        _version++;
         var now = _time.GetUtcNow().UtcDateTime;
         if (_openGap is null)
         {
@@ -357,6 +394,7 @@ internal sealed class BookWorker
     private void Repaired()
     {
         Volatile.Write(ref _state, (int)BookState.Valid);
+        _version++;
         if (_openGap is { } gap)
         {
             var closed = gap with { EndUtc = _time.GetUtcNow().UtcDateTime, EndSeq = _lastSeq };

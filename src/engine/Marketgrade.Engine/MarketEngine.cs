@@ -97,6 +97,16 @@ public sealed class MarketEngine : IAsyncDisposable
     /// <summary>The measured offset of the local clock (local minus NTP time), or null if unknown. Corrects every delay from now on.</summary>
     public void SetClockOffset(TimeSpan? offset) => _clockOffset.Set(offset);
 
+    /// <summary>
+    /// The latest copy of an exchange's best levels (by name, any case), or null if there is none yet or no
+    /// such exchange. Copies are published only while read, so after a quiet period the first one may be old.
+    /// </summary>
+    public BookSnapshot? GetBook(string exchange) =>
+        _feeds.FirstOrDefault(feed => string.Equals(feed.Adapter.Name, exchange, StringComparison.OrdinalIgnoreCase))?.Worker.ReadSnapshot();
+
+    public bool HasExchange(string exchange) =>
+        _feeds.Any(feed => string.Equals(feed.Adapter.Name, exchange, StringComparison.OrdinalIgnoreCase));
+
     /// <summary>Starts without pair rules: no exchange keeps a book.</summary>
     public void Start() => Start([]);
 

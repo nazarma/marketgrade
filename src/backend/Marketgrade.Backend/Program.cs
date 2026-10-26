@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json.Serialization;
 using Marketgrade.Backend;
 using Marketgrade.Engine;
+using Marketgrade.Engine.Books;
 using Marketgrade.Engine.Exchanges;
 using Marketgrade.Engine.Recording;
 using Microsoft.AspNetCore.Hosting.Server;
@@ -72,6 +73,26 @@ app.Use(async (context, next) =>
 
 app.MapGet("/health", () => new { status = "ok", version = EngineInfo.Version, startedAtUtc });
 app.MapGet("/engine/status", (MarketEngine engine) => new { status = engine.Status, events = engine.GetRecentEvents(50) });
+
+// The best levels of one exchange's book, from a copy the engine publishes at most 10 times per second.
+app.MapGet("/books/{exchange}", (string exchange, int? levels, MarketEngine engine) =>
+{
+    if (!engine.HasExchange(exchange))
+    {
+        return Results.NotFound();
+    }
+    if (levels is < 1 or > BookSnapshot.MaxLevels)
+    {
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["levels"] = [$"Must be between 1 and {BookSnapshot.MaxLevels}."],
+        });
+    }
+    return engine.GetBook(exchange) is { } book
+        ? Results.Ok(BookResponse.From(book, levels ?? BookResponse.DefaultLevels))
+        : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "No book yet",
+            detail: "The book is published once it is read; try again in a moment.");
+});
 
 app.MapGet("/settings/recording", (RecordingSettingsStore settings) => new
 {
