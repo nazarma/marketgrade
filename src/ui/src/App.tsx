@@ -11,7 +11,17 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatBytes, formatSinceLastMessage, recordingBadge, stateBadge } from "@/exchangeState";
+import {
+  bookBadge,
+  clockOffset,
+  formatBytes,
+  formatDelay,
+  formatGap,
+  formatProcessing,
+  formatSinceLastMessage,
+  recordingBadge,
+  stateBadge,
+} from "@/exchangeState";
 import { RecordingSettingsForm } from "@/RecordingSettingsForm";
 
 const POLL_INTERVAL_MS = 1000;
@@ -69,7 +79,7 @@ export default function App() {
   const engine = state.kind === "connected" ? state.engine : null;
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-4xl flex-col gap-6 p-8">
+    <main className="mx-auto flex min-h-screen w-full max-w-6xl flex-col gap-6 p-8">
       <header className="flex flex-wrap items-baseline justify-between gap-4">
         <div className="flex items-baseline gap-6">
           <h1 className="text-2xl font-semibold tracking-tight">Marketgrade</h1>
@@ -82,7 +92,10 @@ export default function App() {
             </NavLink>
           </nav>
         </div>
-        <BackendLine state={state} />
+        <div className="flex flex-wrap items-center gap-4">
+          {engine && <ClockLine offsetMs={engine.status.clockOffsetMs} />}
+          <BackendLine state={state} />
+        </div>
       </header>
 
       {state.kind === "error" && (
@@ -189,6 +202,19 @@ function RecordingLine({ recording }: { recording: RecordingStatus }) {
   );
 }
 
+function ClockLine({ offsetMs }: { offsetMs: number | null }) {
+  const clock = clockOffset(offsetMs);
+  return (
+    <div
+      className="flex items-center gap-2 text-sm text-muted-foreground"
+      title={clock.warning ?? undefined}
+    >
+      <span className="font-mono tabular-nums">{clock.label}</span>
+      {clock.warning && <Badge className="bg-warning/15 text-warning">Check clock</Badge>}
+    </div>
+  );
+}
+
 function BackendLine({ state }: { state: ConnectionState }) {
   return (
     <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -205,38 +231,63 @@ function BackendLine({ state }: { state: ConnectionState }) {
 }
 
 function ExchangeTable({ exchanges }: { exchanges: ExchangeStatus[] }) {
+  const number = "py-2 pl-4 text-right font-mono whitespace-nowrap tabular-nums";
+  const heading = "pb-2 pl-4 text-right font-normal whitespace-nowrap";
   return (
-    <table className="w-full text-sm">
-      <thead className="text-left text-muted-foreground">
-        <tr>
-          <th className="pb-2 font-normal">Exchange</th>
-          <th className="pb-2 font-normal">Pair</th>
-          <th className="pb-2 font-normal">State</th>
-          <th className="pb-2 text-right font-normal">Messages/s</th>
-          <th className="pb-2 text-right font-normal">Last message</th>
-        </tr>
-      </thead>
-      <tbody>
-        {exchanges.map((exchange) => {
-          const badge = stateBadge(exchange.state);
-          return (
-            <tr key={exchange.id} className="border-t" title={exchange.lastError ?? undefined}>
-              <td className="py-2 font-medium">{exchange.name}</td>
-              <td className="py-2 font-mono text-muted-foreground">{exchange.pair}</td>
-              <td className="py-2">
-                <Badge className={badge.className}>{badge.label}</Badge>
-              </td>
-              <td className="py-2 text-right font-mono tabular-nums">
-                {exchange.messagesPerSecond.toFixed(1)}
-              </td>
-              <td className="py-2 text-right font-mono tabular-nums">
-                {formatSinceLastMessage(exchange.msSinceLastMessage)}
-              </td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="text-left text-muted-foreground">
+          <tr>
+            <th className="pb-2 font-normal">Exchange</th>
+            <th className="pb-2 pl-4 font-normal">Pair</th>
+            <th className="pb-2 pl-4 font-normal">State</th>
+            <th className="pb-2 pl-4 font-normal">Book</th>
+            <th className={heading}>Bid</th>
+            <th className={heading}>Ask</th>
+            <th className={heading}>Spread</th>
+            <th className={heading} title="Exchange timestamp to arrival, last minute">
+              Delay p50 / p99
+            </th>
+            <th className={heading} title="Parse, apply and check one message, last minute">
+              Processing p50 / p99
+            </th>
+            <th className={heading}>Gaps today</th>
+            <th className={heading}>Messages/s</th>
+            <th className={heading}>Last message</th>
+          </tr>
+        </thead>
+        <tbody>
+          {exchanges.map((exchange) => {
+            const badge = stateBadge(exchange.state);
+            const book = bookBadge(exchange.bookState);
+            return (
+              <tr key={exchange.id} className="border-t" title={exchange.lastError ?? undefined}>
+                <td className="py-2 font-medium">{exchange.name}</td>
+                <td className="py-2 pl-4 font-mono text-muted-foreground">{exchange.pair}</td>
+                <td className="py-2 pl-4">
+                  <Badge className={badge.className}>{badge.label}</Badge>
+                </td>
+                <td className="py-2 pl-4">
+                  <Badge className={book.className}>{book.label}</Badge>
+                </td>
+                <td className={`${number} text-buy`}>{exchange.bestBid ?? "–"}</td>
+                <td className={`${number} text-sell`}>{exchange.bestAsk ?? "–"}</td>
+                <td className={number}>{exchange.spread ?? "–"}</td>
+                <td className={number}>{formatDelay(exchange.delayP50Ms, exchange.delayP99Ms)}</td>
+                <td className={number}>
+                  {formatProcessing(exchange.processingP50Ns, exchange.processingP99Ns)}
+                </td>
+                <td className={number} title={formatGap(exchange.lastGap)}>
+                  {exchange.gapsToday}
+                </td>
+                <td className={number}>{exchange.messagesPerSecond.toFixed(1)}</td>
+                <td className={number}>{formatSinceLastMessage(exchange.msSinceLastMessage)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

@@ -1,4 +1,4 @@
-import type { ConnectionState, RecordingState } from "@/api";
+import type { BookGap, BookState, ConnectionState, RecordingState } from "@/api";
 
 export interface StateBadge {
   label: string;
@@ -25,6 +25,65 @@ export function stateBadge(state: ConnectionState): StateBadge {
     default:
       return { label: String(state), className: sell };
   }
+}
+
+export function bookBadge(state: BookState): StateBadge {
+  switch (state) {
+    case "Valid":
+      return { label: "Valid", className: live };
+    case "Syncing":
+      return { label: "Syncing", className: warning };
+    case "Invalid":
+      return { label: "Invalid", className: sell };
+    case "NoPairRules":
+      return { label: "No pair rules", className: "bg-muted text-muted-foreground" };
+    default:
+      return { label: String(state), className: sell };
+  }
+}
+
+/** Median and 99th percentile, for example "12.3 / 45.6 ms". */
+export function formatDelay(p50Ms: number | null, p99Ms: number | null): string {
+  return p50Ms === null || p99Ms === null ? "–" : `${p50Ms.toFixed(1)} / ${p99Ms.toFixed(1)} ms`;
+}
+
+/** Median and 99th percentile in whole nanoseconds, for example "7,264 / 43,264 ns". */
+export function formatProcessing(p50Ns: number | null, p99Ns: number | null): string {
+  const ns = (value: number) => Math.round(value).toLocaleString("en-US");
+  return p50Ns === null || p99Ns === null ? "–" : `${ns(p50Ns)} / ${ns(p99Ns)} ns`;
+}
+
+export function formatGap(gap: BookGap | null): string | undefined {
+  if (gap === null) {
+    return undefined;
+  }
+  const duration =
+    gap.durationSeconds === null ? "still open" : `${gap.durationSeconds.toFixed(1)} s`;
+  return `Last gap: ${gap.cause} (${duration})`;
+}
+
+export const CLOCK_WARNING_MS = 50;
+
+export interface ClockOffset {
+  label: string;
+  /** Set when delays cannot be trusted as shown. */
+  warning: string | null;
+}
+
+export function clockOffset(offsetMs: number | null): ClockOffset {
+  if (offsetMs === null) {
+    return {
+      label: "Clock offset unknown",
+      warning: "No time server answered, so delays are not corrected for this computer's clock.",
+    };
+  }
+  const label = `Clock offset ${offsetMs > 0 ? "+" : ""}${offsetMs.toFixed(1)} ms`;
+  return Math.abs(offsetMs) > CLOCK_WARNING_MS
+    ? {
+        label,
+        warning: `This computer's clock is more than ${CLOCK_WARNING_MS} ms off; delays are corrected for it.`,
+      }
+    : { label, warning: null };
 }
 
 export function formatSinceLastMessage(ms: number | null): string {

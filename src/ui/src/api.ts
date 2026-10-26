@@ -18,6 +18,19 @@ export interface BackendStatus {
 
 export type ConnectionState = "Connecting" | "Live" | "Reconnecting" | "Blocked" | "Stopped";
 
+export type BookState = "NoPairRules" | "Syncing" | "Valid" | "Invalid";
+
+/** A period in which the book was invalid, from the failed check to the repaired book. */
+export interface BookGap {
+  startUtc: string;
+  /** Null while the book is still being repaired. */
+  endUtc: string | null;
+  cause: string;
+  startSeq: number;
+  endSeq: number | null;
+  durationSeconds: number | null;
+}
+
 export interface ExchangeStatus {
   id: number;
   name: string;
@@ -35,6 +48,24 @@ export interface ExchangeStatus {
   controlMessages: number;
   errorMessages: number;
   bytes: number;
+  bookState: BookState;
+  /** Prices with the pair's decimals; null while the book is not valid. */
+  bestBid: string | null;
+  bestAsk: string | null;
+  spread: string | null;
+  bidLevels: number;
+  askLevels: number;
+  maxBidLevels: number;
+  maxAskLevels: number;
+  /** Exchange timestamp to arrival over the last minute, clock-corrected when the offset is known. */
+  delayP50Ms: number | null;
+  delayP99Ms: number | null;
+  /** Time to parse, apply and check one message over the last minute. */
+  processingP50Ns: number | null;
+  processingP99Ns: number | null;
+  /** Gaps that started today (UTC). */
+  gapsToday: number;
+  lastGap: BookGap | null;
 }
 
 export interface ConnectionEvent {
@@ -59,7 +90,13 @@ export interface RecordingStatus {
 }
 
 export interface EngineStatus {
-  status: { timeUtc: string; exchanges: ExchangeStatus[]; recording: RecordingStatus | null };
+  status: {
+    timeUtc: string;
+    exchanges: ExchangeStatus[];
+    recording: RecordingStatus | null;
+    /** How far this computer's clock is ahead of NTP time; null if unknown. */
+    clockOffsetMs: number | null;
+  };
   /** Oldest first. */
   events: ConnectionEvent[];
 }
