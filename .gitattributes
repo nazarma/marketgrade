@@ -9,3 +9,5 @@
 *.icns binary
 *.woff binary
 *.woff2 binary
+*.zst binary
+*.mgrec binary
