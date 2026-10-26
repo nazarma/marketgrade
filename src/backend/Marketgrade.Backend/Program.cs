@@ -46,6 +46,7 @@ builder.Services.AddSingleton(services => new MarketEngine(
     services.GetRequiredService<ILoggerFactory>().CreateLogger("Marketgrade.Engine"),
     services.GetRequiredService<RecordingSettingsStore>().Load()));
 builder.Services.AddHostedService<EngineHostedService>();
+builder.Services.AddHostedService<ClockOffsetService>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 

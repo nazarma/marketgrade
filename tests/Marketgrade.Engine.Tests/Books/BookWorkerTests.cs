@@ -209,6 +209,24 @@ public class BookWorkerTests
     }
 
     [Fact]
+    public async Task Clock_offset_corrects_the_delay_and_shows_in_the_status()
+    {
+        using var exchange = new FakeBinance();
+        await using var server = await FakeExchangeServer.StartAsync(exchange.StreamAsync);
+        await using var engine = new MarketEngine(s_fast, [new BinanceAdapter(server.Uri, new Uri("https://rest.test/"))],
+            httpHandler: new StubHttpHandler(exchange.SnapshotAsync));
+        Assert.Null(engine.Status.ClockOffsetMs);
+
+        // As if this clock ran 10 minutes behind: every corrected delay grows by that much.
+        engine.SetClockOffset(TimeSpan.FromMinutes(-10));
+        engine.Start([s_binance]);
+        await WaitUntilAsync(() => engine.Status is { ClockOffsetMs: not null, Exchanges: [{ DelayP50Ms: not null }] });
+
+        Assert.Equal(-600_000, engine.Status.ClockOffsetMs);
+        Assert.InRange(engine.Status.Exchanges[0].DelayP50Ms!.Value, 590_000, 610_000);
+    }
+
+    [Fact]
     public async Task Exchange_without_pair_rules_keeps_no_book_but_counts_messages()
     {
         var lines = TestMessages.Sequence("kraken-book.jsonl");
