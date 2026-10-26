@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 
 namespace Marketgrade.Backend;
 
-/// <summary>User settings in SQLite: one row per section, its values as JSON.</summary>
+/// <summary>User settings in SQLite: one row per section, its values as JSON. Other stores share its database and migrations.</summary>
 public sealed class SettingsStore
 {
     /// <summary>Applied in order; <c>PRAGMA user_version</c> is the number applied so far.</summary>
@@ -17,6 +17,16 @@ public sealed class SettingsStore
             updated_at TEXT NOT NULL
         )
         """,
+        """
+        CREATE TABLE pair_rules (
+            exchange_id INTEGER NOT NULL,
+            symbol TEXT NOT NULL,
+            price_decimals INTEGER NOT NULL,
+            amount_decimals INTEGER NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (exchange_id, symbol)
+        )
+        """,
     ];
 
     private static readonly JsonSerializerOptions s_json = new(JsonSerializerDefaults.Web);
@@ -25,9 +35,13 @@ public sealed class SettingsStore
 
     public SettingsStore(string path)
     {
+        Folder = Path.GetDirectoryName(Path.GetFullPath(path))!;
         _connectionString = new SqliteConnectionStringBuilder { DataSource = path }.ToString();
         Migrate();
     }
+
+    /// <summary>The data folder the database is in.</summary>
+    public string Folder { get; }
 
     public T? Get<T>(string key)
     {
@@ -52,7 +66,7 @@ public sealed class SettingsStore
         command.ExecuteNonQuery();
     }
 
-    private SqliteConnection Open()
+    internal SqliteConnection Open()
     {
         var connection = new SqliteConnection(_connectionString);
         connection.Open();

@@ -11,6 +11,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="..\Marketgrade.Engine.Tests\Fixtures\pair-rules\kraken.json" Link="pair-rules-kraken.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\src\backend\Marketgrade.Backend\Marketgrade.Backend.csproj" />
   </ItemGroup>
 </Project>

@@ -75,6 +75,8 @@ public sealed class MarketEngine : IAsyncDisposable
 
     public MessageBufferPool Pool { get; }
 
+    public IEnumerable<ExchangeAdapter> Adapters => _feeds.Select(feed => feed.Adapter);
+
     /// <summary>The latest snapshot. Never blocks.</summary>
     public EngineStatus Status => Volatile.Read(ref _status);
 

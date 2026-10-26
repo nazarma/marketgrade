@@ -32,10 +32,14 @@ builder.Services.AddSingleton(services =>
         ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Marketgrade")
         : configured;
     Directory.CreateDirectory(dataFolder);
-    return new RecordingSettingsStore(
-        new SettingsStore(Path.Combine(dataFolder, "marketgrade.db")),
-        RecordingSettings.Default(Path.Combine(dataFolder, "recordings")));
+    return new SettingsStore(Path.Combine(dataFolder, "marketgrade.db"));
 });
+builder.Services.AddSingleton(services =>
+{
+    var store = services.GetRequiredService<SettingsStore>();
+    return new RecordingSettingsStore(store, RecordingSettings.Default(Path.Combine(store.Folder, "recordings")));
+});
+builder.Services.AddSingleton<PairRulesStore>();
 builder.Services.AddSingleton(services => new MarketEngine(
     new EngineOptions(),
     ExchangeAdapters.CreateDefault(),
