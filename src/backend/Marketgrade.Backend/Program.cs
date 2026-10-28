@@ -50,6 +50,9 @@ builder.Services.AddSingleton(services => new MarketEngine(
 builder.Services.AddSingleton(services => new HistoryStore(Path.Combine(services.GetRequiredService<SettingsStore>().Folder, "history.duckdb")));
 builder.Services.AddSingleton(services => services.GetRequiredService<MarketEngine>().History);
 builder.Services.AddSingleton<HistoryWriter>();
+builder.Services.AddSingleton(services => new HistoryQueries(
+    services.GetRequiredService<HistoryStore>(),
+    [.. services.GetRequiredService<MarketEngine>().Adapters.Select(adapter => (adapter.Id, adapter.Name))]));
 builder.Services.AddHostedService(services => services.GetRequiredService<HistoryWriter>());
 builder.Services.AddHostedService<EngineHostedService>();
 builder.Services.AddHostedService<ClockOffsetService>();
@@ -122,6 +125,17 @@ app.MapGet("/books/{exchange}", (string exchange, int? levels, MarketEngine engi
 
 app.MapHub<LiveHub>(LiveHub.Path);
 
+// Chart history. Minutes when the app was not running have no rows; the user interface shows them as no data.
+app.MapGet("/history/delay", (int? minutes, HistoryQueries history) => minutes is < 1 or > 1_440
+    ? Invalid("minutes", "Must be between 1 and 1,440.")
+    : Results.Ok(history.Delay(minutes ?? 60)));
+app.MapGet("/history/health", (int? hours, HistoryQueries history) => hours is < 1 or > 168
+    ? Invalid("hours", "Must be between 1 and 168.")
+    : Results.Ok(history.Health(hours ?? 24)));
+app.MapGet("/history/gaps", (int? hours, HistoryQueries history) => hours is < 1 or > 168
+    ? Invalid("hours", "Must be between 1 and 168.")
+    : Results.Ok(history.Gaps(hours ?? 24)));
+
 app.MapGet("/settings/recording", (RecordingSettingsStore settings) => new
 {
     values = RecordingSettingsDto.From(settings.Load()),
@@ -155,3 +169,6 @@ app.Lifetime.ApplicationStarted.Register(() =>
 
 await app.RunAsync();
 return 0;
+
+static IResult Invalid(string field, string message) =>
+    Results.ValidationProblem(new Dictionary<string, string[]> { [field] = [message] });
