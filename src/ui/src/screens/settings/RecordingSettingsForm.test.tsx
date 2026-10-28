@@ -2,7 +2,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getRecordingSettings, saveRecordingSettings, type RecordingSettings } from "@/api";
-import { FOLDER_CHANGED_NOTICE, RecordingSettingsForm } from "@/RecordingSettingsForm";
+import {
+  FOLDER_CHANGED_NOTICE,
+  RecordingSettingsForm,
+} from "@/screens/settings/RecordingSettingsForm";
 
 vi.mock("@/api", () => ({ getRecordingSettings: vi.fn(), saveRecordingSettings: vi.fn() }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));

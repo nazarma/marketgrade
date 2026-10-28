@@ -273,6 +273,9 @@
     padding: 0 12px;
     box-sizing: border-box;
   }
+  .field-input.mono {
+    font-family: var(--font-mono);
+  }
   .field-input[aria-invalid="true"] {
     border-color: var(--mg-sell);
   }

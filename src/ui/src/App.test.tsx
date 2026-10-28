@@ -13,6 +13,7 @@ vi.mock("@/api", () => ({
   getEngineStatus: vi.fn(),
   resetBackendInfo: vi.fn(),
   getRecordingSettings: vi.fn(() => new Promise(() => undefined)),
+  getHistorySettings: vi.fn(() => new Promise(() => undefined)),
   getDelayHistory: vi.fn(() => new Promise(() => undefined)),
   getHealthHistory: vi.fn(() => new Promise(() => undefined)),
   getGaps: vi.fn(() => new Promise(() => undefined)),
