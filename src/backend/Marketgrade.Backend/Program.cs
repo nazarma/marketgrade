@@ -49,7 +49,13 @@ builder.Services.AddSingleton(services => new MarketEngine(
 // Hosted services stop in reverse order: the history writer stops after the engine, so it saves the engine's last minute.
 builder.Services.AddSingleton(services => new HistoryStore(Path.Combine(services.GetRequiredService<SettingsStore>().Folder, "history.duckdb")));
 builder.Services.AddSingleton(services => services.GetRequiredService<MarketEngine>().History);
-builder.Services.AddSingleton<HistoryWriter>();
+builder.Services.AddSingleton<HistorySettingsStore>();
+builder.Services.AddSingleton(services =>
+{
+    var writer = ActivatorUtilities.CreateInstance<HistoryWriter>(services);
+    writer.KeepDays = services.GetRequiredService<HistorySettingsStore>().Load().KeepDays;
+    return writer;
+});
 builder.Services.AddSingleton(services => new HistoryQueries(
     services.GetRequiredService<HistoryStore>(),
     [.. services.GetRequiredService<MarketEngine>().Adapters.Select(adapter => (adapter.Id, adapter.Name))]));
@@ -153,6 +159,24 @@ app.MapPut("/settings/recording", (RecordingSettingsDto values, RecordingSetting
     settings.Save(recording);
     engine.ApplyRecordingSettings(recording);
     return Results.Ok(RecordingSettingsDto.From(recording));
+});
+
+app.MapGet("/settings/history", (HistorySettingsStore settings) => new
+{
+    values = settings.Load(),
+    defaults = HistorySettingsDto.Default,
+});
+
+app.MapPut("/settings/history", (HistorySettingsDto values, HistorySettingsStore settings, HistoryWriter writer) =>
+{
+    var errors = values.Validate();
+    if (errors.Count > 0)
+    {
+        return Results.ValidationProblem(errors);
+    }
+    settings.Save(values);
+    writer.KeepDays = values.KeepDays;
+    return Results.Ok(values);
 });
 
 app.Lifetime.ApplicationStarted.Register(() =>
