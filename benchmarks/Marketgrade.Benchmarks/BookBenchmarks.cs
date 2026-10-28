@@ -11,8 +11,9 @@ namespace Marketgrade.Benchmarks;
 /// <summary>
 /// Real update messages, the 500 that follow the first valid book in each exchange's recorded minute,
 /// applied to that book. <see cref="Apply"/> is the handler alone: parse, apply and check.
-/// <see cref="WorkerPath"/> is everything the book worker does per message: classify, handle, delay and
-/// processing statistics, counters and the release of the buffer. Each iteration rebuilds the book from
+/// <see cref="WorkerPath"/> is everything the book worker does per message: classify, handle (for
+/// Coinbase including the hold time from every update's <c>event_time</c>), delay, catch-up, hold time,
+/// queue wait and processing statistics, counters and the release of the buffer. Each iteration rebuilds the book from
 /// the snapshot first, outside the measurement.
 /// </summary>
 [MemoryDiagnoser]

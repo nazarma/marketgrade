@@ -26,6 +26,7 @@ public class KrakenBookHandlerTests
         // Recorded 2026-10-25 from 22:23:17 to about 22:24 UTC.
         Assert.InRange(book.LastExchangeUnixNs, 1_792_966_997_000_000_000, 1_792_967_100_000_000_000);
         Assert.Equal(4, _pool.Available);
+        Assert.Equal(BookHandler.NoHold, _handler.ExchangeHoldNs);
     }
 
     [Fact]

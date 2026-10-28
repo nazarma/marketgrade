@@ -54,6 +54,14 @@ public abstract class BookHandler
     /// <summary>The exchange's timestamp of the last message, Unix nanoseconds, or 0 if it had none.</summary>
     public long ExchangeUnixNs { get; protected set; }
 
+    public const long NoHold = long.MinValue;
+
+    /// <summary>
+    /// How long the exchange held the last message's changes before sending it, in nanoseconds: its timestamp
+    /// minus the oldest change time in it. <see cref="NoHold"/> if the exchange does not say (only Coinbase does).
+    /// </summary>
+    public long ExchangeHoldNs { get; protected set; } = NoHold;
+
     public FailureKind Failure { get; private set; }
 
     /// <summary>Why the last message failed, including the numbers involved.</summary>
@@ -62,6 +70,7 @@ public abstract class BookHandler
     public HandleOutcome Handle(MessageBuffer message)
     {
         ExchangeUnixNs = 0;
+        ExchangeHoldNs = NoHold;
         Kind = Adapter.Classify(message.Span);
         if (message.ConnectionId != _connectionId)
         {

@@ -35,6 +35,7 @@ public sealed record RecordingStatus(
 /// <param name="ProcessingP50Ns">Median time to parse, apply and check one message over the last minute; null without data.</param>
 /// <param name="CatchUpMessages">Messages since the last snapshot that arrived within 100 ms after it, left out of the delay statistics.</param>
 /// <param name="CatchUpMaxDelayMs">The largest delay of those messages, or null if there were none.</param>
+/// <param name="ExchangeHoldP50Ms">Median time the exchange held changes before sending them (message timestamp minus its oldest change time), over the last minute; only Coinbase reports change times, null otherwise.</param>
 /// <param name="QueueWaitP50Ns">Median time from receiving a message to the book worker starting on it, over the last minute; null without data.</param>
 /// <param name="GapsToday">Times the book became invalid today (UTC).</param>
 public sealed record ExchangeStatus(
@@ -70,4 +71,6 @@ public sealed record ExchangeStatus(
     long? QueueWaitP50Ns = null,
     long? QueueWaitP99Ns = null,
     long CatchUpMessages = 0,
-    double? CatchUpMaxDelayMs = null);
+    double? CatchUpMaxDelayMs = null,
+    double? ExchangeHoldP50Ms = null,
+    double? ExchangeHoldP99Ms = null);

@@ -9,11 +9,14 @@ namespace Marketgrade.Engine.Exchanges;
 /// whatever its channel (heartbeats and subscriptions too, measured on a recording), so every message
 /// must carry the previous one's number plus 1. The first number of a connection is taken as the start.
 /// A snapshot event replaces the book; <c>new_quantity</c> is the new size, 0 removes the level.
+/// Each update carries the <c>event_time</c> of the change; the envelope <c>timestamp</c> minus the oldest
+/// one is how long Coinbase held the message (not for snapshots, whose times are the levels' history).
 /// </summary>
 internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rules, int capacity, ILogger? logger)
     : BookHandler(adapter, rules, capacity, logger)
 {
     private long _lastSequence = -1;
+    private long _oldestEventTime;
 
     protected override void ResetCore()
     {
@@ -31,6 +34,7 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
         var data = Kind == MessageKind.Data;
         var hasSequence = false;
         var snapshot = false;
+        _oldestEventTime = long.MaxValue;
         var reader = new Utf8JsonReader(message.Span);
         Expect(ref reader, JsonTokenType.StartObject);
         while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
@@ -74,6 +78,10 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
         {
             return HandleOutcome.Ignored;
         }
+        if (!snapshot && _oldestEventTime != long.MaxValue && ExchangeUnixNs != 0)
+        {
+            ExchangeHoldNs = ExchangeUnixNs - _oldestEventTime;
+        }
         return Applied(message);
     }
 
@@ -109,7 +117,7 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
                     }
                     else
                     {
-                        ReadUpdates(ref reader);
+                        ReadUpdates(ref reader, holdTime: isSnapshot == false);
                     }
                 }
                 else
@@ -121,7 +129,8 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
         return snapshot;
     }
 
-    private void ReadUpdates(ref Utf8JsonReader reader)
+    /// <param name="holdTime">Keeps the oldest <c>event_time</c>; one that cannot be read is left out, it does not touch the book.</param>
+    private void ReadUpdates(ref Utf8JsonReader reader, bool holdTime)
     {
         var rules = Book.Rules;
         Expect(ref reader, JsonTokenType.StartArray);
@@ -145,6 +154,15 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
                 else if (reader.ValueTextEquals("new_quantity"u8))
                 {
                     quantity = ReadDecimal(ref reader, rules.AmountDecimals);
+                }
+                else if (holdTime && reader.ValueTextEquals("event_time"u8))
+                {
+                    reader.Read();
+                    if (reader.TokenType == JsonTokenType.String && !reader.ValueIsEscaped
+                        && Iso8601.TryParseUnixNs(reader.ValueSpan, out var eventTime) && eventTime < _oldestEventTime)
+                    {
+                        _oldestEventTime = eventTime;
+                    }
                 }
                 else
                 {

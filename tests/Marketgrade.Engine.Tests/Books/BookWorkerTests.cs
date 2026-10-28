@@ -101,6 +101,8 @@ public class BookWorkerTests
         await WaitUntilAsync(() => engine.Status.Exchanges[0] is { BookState: BookState.Valid, LastGap.EndUtc: not null });
 
         Assert.Equal("Sequence gap: expected 11, got 12 (message 12)", engine.Status.Exchanges[0].LastGap!.Cause);
+        await WaitUntilAsync(() => engine.Status.Exchanges[0].ExchangeHoldP50Ms is not null);
+        Assert.True(engine.Status.Exchanges[0].ExchangeHoldP99Ms >= engine.Status.Exchanges[0].ExchangeHoldP50Ms);
         Assert.Equal(2, server.Connections.Count);
     }
 

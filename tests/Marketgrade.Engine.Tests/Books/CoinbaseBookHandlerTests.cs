@@ -70,6 +70,51 @@ public class CoinbaseBookHandlerTests
     }
 
     [Fact]
+    public void Hold_time_is_the_timestamp_minus_the_oldest_event_time()
+    {
+        Assert.Equal(HandleOutcome.Synced, Handle(Snapshot));
+        Assert.Equal(BookHandler.NoHold, _handler.ExchangeHoldNs);
+
+        Assert.Equal(HandleOutcome.Applied, Handle(Update(1, "22:23:17.312558822", "22:23:17.300000", "22:23:17.262558822", "22:23:17.310000")));
+
+        Assert.Equal(50_000_000, _handler.ExchangeHoldNs);
+    }
+
+    [Fact]
+    public void Hold_time_of_recorded_messages_matches_their_times()
+    {
+        Assert.Equal(HandleOutcome.Synced, Handle(Snapshot));
+        foreach (var message in Recorded.Take(50))
+        {
+            Handle(message);
+            using var json = System.Text.Json.JsonDocument.Parse(message);
+            var root = json.RootElement;
+            if (root.GetProperty("channel").GetString() != "l2_data")
+            {
+                Assert.Equal(BookHandler.NoHold, _handler.ExchangeHoldNs);
+                continue;
+            }
+            var oldest = root.GetProperty("events").EnumerateArray()
+                .SelectMany(e => e.GetProperty("updates").EnumerateArray())
+                .Min(u => Ns(u.GetProperty("event_time").GetString()!));
+            Assert.Equal(Ns(root.GetProperty("timestamp").GetString()!) - oldest, _handler.ExchangeHoldNs);
+        }
+    }
+
+    [Fact]
+    public void Unreadable_event_time_is_left_out_without_touching_the_book()
+    {
+        Assert.Equal(HandleOutcome.Synced, Handle(Snapshot));
+
+        Assert.Equal(HandleOutcome.Applied, Handle(Update(1, "22:23:17.312558822", "not a time", "22:23:17.302558822")));
+        Assert.Equal(10_000_000, _handler.ExchangeHoldNs);
+
+        Assert.Equal(HandleOutcome.Applied, Handle(Update(2, "22:23:17.400000", "yesterday")));
+        Assert.Equal(BookHandler.NoHold, _handler.ExchangeHoldNs);
+        Assert.Equal(BookState.Valid, _handler.Book.State);
+    }
+
+    [Fact]
     public void Error_messages_are_ignored()
     {
         Assert.Equal(HandleOutcome.Ignored, Handle("""{"type":"error","message":"subscribe or unsubscribe required"}"""));
@@ -85,6 +130,20 @@ public class CoinbaseBookHandlerTests
 
         Assert.Equal(HandleOutcome.Failed, Handle(message));
         Assert.Equal(FailureKind.Parse, _handler.Failure);
+    }
+
+    /// <summary>An update message on 2026-10-25 with one bid update per event time; a time without a colon is written as is.</summary>
+    private static string Update(long sequence, string timestamp, params string[] eventTimes)
+    {
+        var updates = eventTimes.Select((time, i) =>
+            $$"""{"side":"bid","event_time":"{{(time.Contains(':') ? $"2026-10-25T{time}Z" : time)}}","price_level":"{{80000 + i}}.00","new_quantity":"0.5"}""");
+        return $$"""{"channel":"l2_data","timestamp":"2026-10-25T{{timestamp}}Z","sequence_num":{{sequence}},"events":[{"type":"update","product_id":"BTC-USD","updates":[{{string.Join(",", updates)}}]}]}""";
+    }
+
+    private static long Ns(string time)
+    {
+        Assert.True(Iso8601.TryParseUnixNs(System.Text.Encoding.ASCII.GetBytes(time), out var unixNs));
+        return unixNs;
     }
 
     private HandleOutcome Handle(string message, long connectionId = 1)

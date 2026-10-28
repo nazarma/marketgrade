@@ -53,6 +53,7 @@ internal sealed class BookWorker
     private readonly WindowedHistogram _delay;
     private readonly WindowedHistogram _processing;
     private readonly WindowedHistogram _queueWait;
+    private readonly WindowedHistogram _hold;
     private readonly CancellationTokenSource _stop = new();
 
     private BookHandler? _handler;
@@ -89,6 +90,9 @@ internal sealed class BookWorker
     private long _catchUpStart = long.MinValue;
     private long _catchUpMessages;
     private long _catchUpMaxDelay;
+    private long _holdP50;
+    private long _holdP99;
+    private long _holdCount;
     private long _queueWaitP50 = -1;
     private long _queueWaitP99 = -1;
     private int _gapsToday;
@@ -132,6 +136,7 @@ internal sealed class BookWorker
         _delay = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
         _processing = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
         _queueWait = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
+        _hold = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
     }
 
     public ExchangeAdapter Adapter => _adapter;
@@ -186,6 +191,14 @@ internal sealed class BookWorker
 
     /// <summary>The largest delay of those catch-up messages, in nanoseconds.</summary>
     public long CatchUpMaxDelayNs => Interlocked.Read(ref _catchUpMaxDelay);
+
+    /// <summary>Exchange hold time percentiles over the last minute in nanoseconds (Coinbase only, see <see cref="BookHandler.ExchangeHoldNs"/>).</summary>
+    public long HoldP50Ns => Interlocked.Read(ref _holdP50);
+
+    public long HoldP99Ns => Interlocked.Read(ref _holdP99);
+
+    /// <summary>Hold times measured in the last minute; 0 for an exchange that does not report change times.</summary>
+    public long HoldCount => Interlocked.Read(ref _holdCount);
 
     /// <summary>Time from receiving a message to the worker starting on it, over the last minute; 0 without data.</summary>
     public long QueueWaitP50Ns => Interlocked.Read(ref _queueWaitP50);
@@ -311,6 +324,10 @@ internal sealed class BookWorker
             {
                 var offset = _clockOffset.Ns;
                 RecordDelay(buffer.ArrivalUnixNs, buffer.ArrivalUnixNs - exchangeTime - (offset == ClockOffset.Unknown ? 0 : offset));
+            }
+            if (_handler.ExchangeHoldNs != BookHandler.NoHold)
+            {
+                _hold.Record(_handler.ExchangeHoldNs);
             }
             PublishTop();
         }
@@ -493,6 +510,7 @@ internal sealed class BookWorker
         _delay.Rotate(now);
         _processing.Rotate(now);
         _queueWait.Rotate(now);
+        _hold.Rotate(now);
         var delay = _delay.Merge();
         Interlocked.Exchange(ref _delayP50, delay.Percentile(50));
         Interlocked.Exchange(ref _delayP99, delay.Percentile(99));
@@ -500,6 +518,10 @@ internal sealed class BookWorker
         var processing = _processing.Merge();
         Interlocked.Exchange(ref _processingP50, processing.Percentile(50));
         Interlocked.Exchange(ref _processingP99, processing.Percentile(99));
+        var hold = _hold.Merge();
+        Interlocked.Exchange(ref _holdP50, hold.Percentile(50));
+        Interlocked.Exchange(ref _holdP99, hold.Percentile(99));
+        Interlocked.Exchange(ref _holdCount, hold.Count);
         var queueWait = _queueWait.Merge();
         Interlocked.Exchange(ref _queueWaitP50, queueWait.Count > 0 ? queueWait.Percentile(50) : -1);
         Interlocked.Exchange(ref _queueWaitP99, queueWait.Count > 0 ? queueWait.Percentile(99) : -1);
