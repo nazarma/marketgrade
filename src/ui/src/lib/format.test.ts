@@ -89,5 +89,7 @@ describe("formatters", () => {
     expect(formatTime("not a time")).toBe(NONE);
     expect(formatAmount(0.042)).toBe("0.0420");
     expect(formatAmount(1.23456)).toBe("1.2346");
+    expect(formatAmount(0.00000005)).toBe("0.00000005");
+    expect(formatAmount(0.0000579)).toBe("0.0000579");
   });
 });

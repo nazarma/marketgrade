@@ -169,7 +169,11 @@ function toDate(time: Date | string | number): Date {
   return time instanceof Date ? time : new Date(typeof time === "string" ? parseTime(time) : time);
 }
 
-/** An amount of the base currency with four decimals, "0.0420". */
+/** An amount of the base currency with four decimals, "0.0420"; smaller ones with up to eight, "0.00000005". */
 export function formatAmount(value: number): string {
-  return value.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 });
+  const small = value !== 0 && Math.abs(value) < 0.0001;
+  return value.toLocaleString("en-US", {
+    minimumFractionDigits: 4,
+    maximumFractionDigits: small ? 8 : 4,
+  });
 }
