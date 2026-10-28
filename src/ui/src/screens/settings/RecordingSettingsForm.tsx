@@ -7,7 +7,7 @@ import {
   type RecordingSettings,
   type RecordingSettingsResponse,
 } from "@/api";
-import { fromForm, toForm, type RecordingForm } from "@/recordingSettings";
+import { fromForm, toForm, type RecordingForm } from "@/screens/settings/recordingSettings";
 import {
   Field,
   FormActions,

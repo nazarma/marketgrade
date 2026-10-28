@@ -1,6 +1,4 @@
 @import "tailwindcss";
-@import "tw-animate-css";
-@import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
@@ -30,7 +28,7 @@
   --mg-coinbase: #5cc8ff;
   --mg-binance: #f5b841;
 
-  /* shadcn/ui tokens mapped onto the palette */
+  /* Tailwind's colour names mapped onto the palette */
   --background: var(--mg-background);
   --foreground: var(--mg-text);
   --card: var(--mg-panel);

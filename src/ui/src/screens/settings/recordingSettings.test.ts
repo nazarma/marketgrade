@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { RecordingSettings } from "./api";
-import { fromForm, toForm } from "./recordingSettings";
+import type { RecordingSettings } from "@/api";
+import { fromForm, toForm } from "@/screens/settings/recordingSettings";
 
 const settings: RecordingSettings = {
   enabled: false,

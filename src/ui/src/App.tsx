@@ -1,14 +1,18 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Navigate, Route, Routes } from "react-router";
 import { getBackendInfo, getBackendStatus, getEngineStatus, resetBackendInfo } from "@/api";
 import { AppShell } from "@/app/AppShell";
 import { BackendUnreachable, Starting } from "@/app/BackendUnreachable";
 import { startLive, stopLive } from "@/live/hub";
 import { seeded, useLiveStore } from "@/live/liveStore";
-import { FlowScreen } from "@/screens/FlowScreen";
 import { HealthScreen } from "@/screens/HealthScreen";
 import { OverviewScreen } from "@/screens/OverviewScreen";
 import { SettingsScreen } from "@/screens/SettingsScreen";
+
+// The flow screen brings PixiJS, most of the code; it loads when first opened.
+const FlowScreen = lazy(() =>
+  import("@/screens/FlowScreen").then((module) => ({ default: module.FlowScreen })),
+);
 
 type Gate = { kind: "starting" } | { kind: "ready" } | { kind: "error"; message: string };
 
@@ -65,7 +69,14 @@ export default function App() {
     <Routes>
       <Route element={<AppShell />}>
         <Route path="overview" element={<OverviewScreen />} />
-        <Route path="flow" element={<FlowScreen />} />
+        <Route
+          path="flow"
+          element={
+            <Suspense fallback={null}>
+              <FlowScreen />
+            </Suspense>
+          }
+        />
         <Route path="health" element={<HealthScreen />} />
         <Route path="settings" element={<SettingsScreen />} />
         <Route path="*" element={<Navigate to="/overview" replace />} />
