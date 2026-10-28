@@ -33,6 +33,8 @@ public sealed record RecordingStatus(
 /// <param name="MaxBidLevels">The most levels the bid side ever held, for tuning the book capacity. Likewise <paramref name="MaxAskLevels"/>.</param>
 /// <param name="DelayP50Ms">Median delay from the exchange's timestamp to arrival over the last minute, clock-corrected when the offset is known; null without data.</param>
 /// <param name="ProcessingP50Ns">Median time to parse, apply and check one message over the last minute; null without data.</param>
+/// <param name="CatchUpMessages">Messages since the last snapshot that arrived within 100 ms after it, left out of the delay statistics.</param>
+/// <param name="CatchUpMaxDelayMs">The largest delay of those messages, or null if there were none.</param>
 /// <param name="QueueWaitP50Ns">Median time from receiving a message to the book worker starting on it, over the last minute; null without data.</param>
 /// <param name="GapsToday">Times the book became invalid today (UTC).</param>
 public sealed record ExchangeStatus(
@@ -66,4 +68,6 @@ public sealed record ExchangeStatus(
     int GapsToday = 0,
     BookGap? LastGap = null,
     long? QueueWaitP50Ns = null,
-    long? QueueWaitP99Ns = null);
+    long? QueueWaitP99Ns = null,
+    long CatchUpMessages = 0,
+    double? CatchUpMaxDelayMs = null);

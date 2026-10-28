@@ -242,7 +242,9 @@ public sealed class MarketEngine : IAsyncDisposable
                 worker.GapsToday,
                 worker.LastGap,
                 worker.QueueWaitP50Ns >= 0 ? worker.QueueWaitP50Ns : null,
-                worker.QueueWaitP99Ns >= 0 ? worker.QueueWaitP99Ns : null);
+                worker.QueueWaitP99Ns >= 0 ? worker.QueueWaitP99Ns : null,
+                worker.CatchUpMessages,
+                worker.CatchUpMessages > 0 ? worker.CatchUpMaxDelayNs / 1e6 : null);
             feed.LastDataMessages = data;
             feed.LastBytes = bytes;
         }

@@ -63,7 +63,9 @@ public class BookWorkerTests
         Assert.Equal(Decimal(status.BestAsk) - Decimal(status.BestBid), Decimal(status.Spread));
         Assert.Equal(KrakenAdapter.BookDepth, status.BidLevels);
         Assert.NotNull(status.ProcessingP50Ns);
-        Assert.NotNull(status.DelayP50Ms);
+        // The fake server sends everything right after the snapshot, so most of it is catch-up.
+        Assert.True(status.CatchUpMessages > 0);
+        Assert.NotNull(status.CatchUpMaxDelayMs);
         var events = engine.GetRecentEvents(50).Select(e => e.Event).ToList();
         Assert.Equal(["Book synced", "Book invalid", "Reconnect requested", "Book valid"],
             events.Where(e => e.StartsWith("Book", StringComparison.Ordinal) || e == "Reconnect requested"));
@@ -125,6 +127,9 @@ public class BookWorkerTests
         Assert.Equal("100.00", status.BestBid);
         Assert.Equal("100.50", status.BestAsk);
         Assert.Equal("0.50", status.Spread);
+        // Events arrive every 5 ms, so some land within 100 ms after the second snapshot was applied.
+        Assert.True(status.CatchUpMessages > 0);
+        Assert.NotNull(status.CatchUpMaxDelayMs);
         await engine.StopAsync();
         Assert.Equal(engine.Pool.Created, engine.Pool.Available);
         await engine.DisposeAsync();

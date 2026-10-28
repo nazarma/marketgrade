@@ -28,6 +28,12 @@ internal sealed class BookWorker
 {
     private const int MaxBatch = 256;
 
+    /// <summary>
+    /// Messages arriving this long after a snapshot are catch-up: they queued behind the snapshot on the way
+    /// (Coinbase's is 4.5 MB), so their delay is the snapshot's transfer, not the exchange's.
+    /// </summary>
+    public static readonly long CatchUpWindowNs = (long)TimeSpan.FromMilliseconds(100).TotalNanoseconds;
+
     private static readonly double s_nsPerTick = 1e9 / Stopwatch.Frequency;
 
     private readonly ExchangeAdapter _adapter;
@@ -80,6 +86,9 @@ internal sealed class BookWorker
     private long _delayCount;
     private long _processingP50;
     private long _processingP99;
+    private long _catchUpStart = long.MinValue;
+    private long _catchUpMessages;
+    private long _catchUpMaxDelay;
     private long _queueWaitP50 = -1;
     private long _queueWaitP99 = -1;
     private int _gapsToday;
@@ -171,6 +180,12 @@ internal sealed class BookWorker
     public long ProcessingP50Ns => Interlocked.Read(ref _processingP50);
 
     public long ProcessingP99Ns => Interlocked.Read(ref _processingP99);
+
+    /// <summary>Messages since the last snapshot that arrived within <see cref="CatchUpWindowNs"/> after it; not in the delay statistics.</summary>
+    public long CatchUpMessages => Interlocked.Read(ref _catchUpMessages);
+
+    /// <summary>The largest delay of those catch-up messages, in nanoseconds.</summary>
+    public long CatchUpMaxDelayNs => Interlocked.Read(ref _catchUpMaxDelay);
 
     /// <summary>Time from receiving a message to the worker starting on it, over the last minute; 0 without data.</summary>
     public long QueueWaitP50Ns => Interlocked.Read(ref _queueWaitP50);
@@ -280,6 +295,11 @@ internal sealed class BookWorker
             }
             if (outcome == HandleOutcome.Synced)
             {
+                if (_handler is not BinanceBookHandler)
+                {
+                    // Kraken and Coinbase: this message is the snapshot.
+                    StartCatchUp(buffer.ArrivalUnixNs);
+                }
                 Repaired();
             }
             else if (outcome == HandleOutcome.Failed)
@@ -290,7 +310,7 @@ internal sealed class BookWorker
             if (exchangeTime != 0)
             {
                 var offset = _clockOffset.Ns;
-                _delay.Record(buffer.ArrivalUnixNs - exchangeTime - (offset == ClockOffset.Unknown ? 0 : offset));
+                RecordDelay(buffer.ArrivalUnixNs, buffer.ArrivalUnixNs - exchangeTime - (offset == ClockOffset.Unknown ? 0 : offset));
             }
             PublishTop();
         }
@@ -319,6 +339,33 @@ internal sealed class BookWorker
         {
             buffer.Release();
         }
+    }
+
+    /// <summary>A delay goes to the statistics, or to the catch-up counters if the message arrived right after a snapshot.</summary>
+    private void RecordDelay(long arrivalUnixNs, long delayNs)
+    {
+        if (_catchUpStart != long.MinValue)
+        {
+            var sinceSnapshot = arrivalUnixNs - _catchUpStart;
+            if (sinceSnapshot >= 0 && sinceSnapshot <= CatchUpWindowNs)
+            {
+                Interlocked.Increment(ref _catchUpMessages);
+                if (delayNs > Interlocked.Read(ref _catchUpMaxDelay))
+                {
+                    Interlocked.Exchange(ref _catchUpMaxDelay, delayNs);
+                }
+                return;
+            }
+        }
+        _delay.Record(delayNs);
+    }
+
+    /// <summary>Opens the catch-up window at a snapshot; the counters start again.</summary>
+    private void StartCatchUp(long snapshotUnixNs)
+    {
+        _catchUpStart = snapshotUnixNs;
+        Interlocked.Exchange(ref _catchUpMessages, 0);
+        Interlocked.Exchange(ref _catchUpMaxDelay, 0);
     }
 
     /// <summary>Runs after each batch and at least once per housekeeping interval. Allocation-free unless something changes.</summary>
@@ -441,7 +488,7 @@ internal sealed class BookWorker
         Volatile.Write(ref _maxAskLevels, book.Asks.MaxCount);
     }
 
-    private void PublishStatistics(long now)
+    internal void PublishStatistics(long now)
     {
         _delay.Rotate(now);
         _processing.Rotate(now);
@@ -475,6 +522,11 @@ internal sealed class BookWorker
                 QueueForRecorder(snapshot);
                 var outcome = binance.OnSnapshot(snapshot);
                 snapshot.Release();
+                if (outcome != HandleOutcome.Failed)
+                {
+                    // Events that arrive from now on may have waited for the snapshot to be applied.
+                    StartCatchUp((_time.GetUtcNow().UtcTicks - DateTime.UnixEpoch.Ticks) * 100);
+                }
                 if (outcome == HandleOutcome.Synced)
                 {
                     Repaired();
