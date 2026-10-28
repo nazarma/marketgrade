@@ -29,6 +29,27 @@ pnpm dev
 
 `pnpm dev` builds the backend, starts the Vite dev server and opens the desktop window.
 
+### In a browser
+
+For automated screenshots the user interface can also run in a normal browser against a backend started by
+hand. This only exists in the Vite dev server; production builds do not contain it.
+
+```sh
+dotnet build src/backend/Marketgrade.Backend
+MARKETGRADE_TOKEN=dev-token MARKETGRADE_PORT=5299 MARKETGRADE_DATA_DIR=/tmp/marketgrade-dev \
+  artifacts/bin/Marketgrade.Backend/debug/Marketgrade.Backend
+```
+
+Then, in a second terminal:
+
+```sh
+VITE_BACKEND_PORT=5299 VITE_BACKEND_TOKEN=dev-token pnpm --dir src/ui dev
+```
+
+and open <http://localhost:5173>. `MARKETGRADE_PORT` fixes the backend's port (it still listens on
+`127.0.0.1` only and still requires the token); the desktop app never sets it. A separate data folder keeps
+these runs out of the app's own settings, history and recordings.
+
 ## Checks
 
 ```sh

@@ -4,45 +4,57 @@
 @import "@fontsource-variable/geist";
 @import "@fontsource-variable/geist-mono";
 
-/* Marketgrade palette. The app is dark only. */
+/* Marketgrade design tokens. The app is dark only. */
 :root {
   color-scheme: dark;
 
   --mg-background: #0a0d12;
   --mg-panel: #11151c;
+  --mg-raised: #161b24;
   --mg-border: #222936;
+  --mg-border-subtle: #1a202a;
+  --mg-border-strong: #2e3746;
+  --mg-grid: #1e2430;
+  --mg-canvas: #07090d;
   --mg-text: #e8ebf0;
   --mg-muted-text: #8b95a5;
   --mg-accent: #5cc8ff;
+  --mg-accent-hover: #8fdbff;
+  --mg-on-accent: #06121a;
   --mg-buy: #3ddc97;
   --mg-sell: #ff6b78;
   --mg-warning: #f5b841;
+  --mg-valid-track: #14302a;
+
+  --mg-kraken: #a78bfa;
+  --mg-coinbase: #5cc8ff;
+  --mg-binance: #f5b841;
 
   /* shadcn/ui tokens mapped onto the palette */
   --background: var(--mg-background);
   --foreground: var(--mg-text);
   --card: var(--mg-panel);
   --card-foreground: var(--mg-text);
-  --popover: var(--mg-panel);
+  --popover: var(--mg-raised);
   --popover-foreground: var(--mg-text);
   --primary: var(--mg-accent);
-  --primary-foreground: var(--mg-background);
-  --secondary: var(--mg-border);
+  --primary-foreground: var(--mg-on-accent);
+  --secondary: var(--mg-raised);
   --secondary-foreground: var(--mg-text);
-  --muted: var(--mg-border);
+  --muted: var(--mg-raised);
   --muted-foreground: var(--mg-muted-text);
-  --accent: var(--mg-border);
+  --accent: var(--mg-raised);
   --accent-foreground: var(--mg-text);
   --destructive: var(--mg-sell);
   --border: var(--mg-border);
-  --input: var(--mg-border);
+  --input: var(--mg-border-strong);
   --ring: var(--mg-accent);
-  --radius: 0.625rem;
+  --radius: 0.5rem;
 }
 
 @theme inline {
-  --font-sans: "Geist Variable", sans-serif;
-  --font-mono: "Geist Mono Variable", monospace;
+  --font-sans: "Geist Variable", system-ui, sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, monospace;
   --font-heading: var(--font-sans);
 
   --color-background: var(--background);
@@ -63,14 +75,21 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-panel: var(--mg-panel);
+  --color-raised: var(--mg-raised);
+  --color-subtle: var(--mg-border-subtle);
+  --color-strong: var(--mg-border-strong);
   --color-buy: var(--mg-buy);
   --color-sell: var(--mg-sell);
   --color-warning: var(--mg-warning);
+  --color-kraken: var(--mg-kraken);
+  --color-coinbase: var(--mg-coinbase);
+  --color-binance: var(--mg-binance);
 
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-xl: calc(var(--radius) * 1.5);
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
@@ -78,12 +97,192 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
   }
   html {
     @apply font-sans;
   }
   body {
-    @apply bg-background text-foreground antialiased;
+    margin: 0;
+    background: var(--mg-background);
+    color: var(--mg-text);
+    -webkit-font-smoothing: antialiased;
+  }
+  a {
+    color: var(--mg-accent);
+  }
+  a:hover {
+    color: var(--mg-accent-hover);
+  }
+  /* Visible keyboard focus everywhere, never on mouse clicks. */
+  :focus-visible {
+    outline: 2px solid var(--mg-accent);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Every number uses tabular figures. */
+  .mono {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+  .panel {
+    background: var(--mg-panel);
+    border: 1px solid var(--mg-border);
+    border-radius: 12px;
+    box-sizing: border-box;
+  }
+  .lbl {
+    font-size: 12px;
+    color: var(--mg-muted-text);
+  }
+  .h2 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .stat-value {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-size: 22px;
+    margin-top: 4px;
+  }
+  .ok {
+    color: var(--mg-buy);
+  }
+  .warn {
+    color: var(--mg-warning);
+  }
+  .bad {
+    color: var(--mg-sell);
+  }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    background: var(--mg-raised);
+    border: 1px solid var(--mg-border);
+    border-radius: 999px;
+    padding: 6px 12px;
+    white-space: nowrap;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--mg-buy);
+    box-shadow: 0 0 0 4px rgb(61 220 151 / 0.15);
+  }
+  .dot.dot-warn {
+    background: var(--mg-warning);
+    box-shadow: 0 0 0 4px rgb(245 184 65 / 0.15);
+  }
+  .dot.dot-off {
+    background: var(--mg-muted-text);
+    box-shadow: none;
+  }
+  .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--mg-raised);
+    white-space: nowrap;
+  }
+  .btn-primary,
+  .btn-secondary {
+    font: inherit;
+    font-size: 14px;
+    border-radius: 8px;
+    height: 44px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    font-weight: 500;
+    color: var(--mg-on-accent);
+    background: var(--mg-accent);
+    border: 0;
+    padding: 0 16px;
+  }
+  .btn-primary:hover {
+    background: var(--mg-accent-hover);
+  }
+  .btn-secondary {
+    color: var(--mg-text);
+    background: var(--mg-raised);
+    border: 1px solid var(--mg-border-strong);
+    padding: 0 14px;
+  }
+  .btn-secondary:hover {
+    border-color: var(--mg-muted-text);
+  }
+  .btn-secondary[aria-pressed="true"] {
+    border-color: var(--mg-accent);
+    color: var(--mg-accent);
+  }
+  .btn-primary:disabled,
+  .btn-secondary:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .tbl th {
+    text-align: left;
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--mg-muted-text);
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--mg-border);
+    white-space: nowrap;
+  }
+  .tbl td {
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--mg-border-subtle);
+  }
+  .tbl.tbl-compact td {
+    padding: 9px 12px;
+  }
+  .tbl tr:last-child td {
+    border-bottom: 0;
+  }
+  .tbl .r {
+    text-align: right;
+  }
+  .field-input {
+    font: inherit;
+    font-size: 14px;
+    color: var(--mg-text);
+    background: var(--mg-raised);
+    border: 1px solid var(--mg-border-strong);
+    border-radius: 8px;
+    height: 40px;
+    padding: 0 12px;
+    box-sizing: border-box;
+  }
+  .field-input[aria-invalid="true"] {
+    border-color: var(--mg-sell);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0s !important;
+    animation-duration: 0s !important;
   }
 }

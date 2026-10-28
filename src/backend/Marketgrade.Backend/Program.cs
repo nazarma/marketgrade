@@ -18,7 +18,10 @@ builder.Logging.ClearProviders();
 builder.Logging.AddConsole(options => options.LogToStandardErrorThreshold = LogLevel.Trace);
 builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
 
-builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, 0));
+// Port 0 lets the operating system choose. MARKETGRADE_PORT fixes it for the browser development mode (see the
+// README); the desktop shell never sets it. Either way only this computer can connect, and only with the token.
+var port = int.TryParse(builder.Configuration["MARKETGRADE_PORT"], out var fixedPort) ? fixedPort : 0;
+builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Loopback, port));
 
 builder.Services.AddCors(options => options.AddDefaultPolicy(policy => policy
     .WithOrigins("tauri://localhost", "http://tauri.localhost", "http://localhost:5173")

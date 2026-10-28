@@ -9,7 +9,7 @@ import {
   type RecordingSettings,
 } from "./api";
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), isTauri: () => true }));
 
 const health = { status: "ok", version: "0.1.0", startedAtUtc: "2026-01-01T00:00:00Z" };
 const engineStatus = {

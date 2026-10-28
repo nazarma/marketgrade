@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "@tauri-apps/api/core";
 
 export interface BackendInfo {
   port: number;
@@ -36,7 +36,7 @@ export interface ExchangeStatus {
   name: string;
   pair: string;
   state: ConnectionState;
-  /** Data messages only; heartbeats, control and error messages are counted separately. */
+  /** Book update messages only; trade, heartbeat, control and error messages are counted separately. */
   messagesPerSecond: number;
   bytesPerSecond: number;
   msSinceLastMessage: number | null;
@@ -75,6 +75,12 @@ export interface ExchangeStatus {
   /** Message timestamp minus its oldest change time, last minute; only Coinbase reports it. */
   exchangeHoldP50Ms: number | null;
   exchangeHoldP99Ms: number | null;
+  tradeMessages: number;
+  /** Trades parsed; a trade message can hold several. */
+  trades: number;
+  tradesPerSecond: number;
+  /** Trade messages that could not be read; they never affect the book. */
+  tradeFailures: number;
 }
 
 export interface ConnectionEvent {
@@ -117,8 +123,12 @@ export function resetBackendInfo() {
   backendInfo = undefined;
 }
 
-function getBackendInfo(): Promise<BackendInfo> {
-  backendInfo ??= invoke<BackendInfo>("get_backend_info");
+/** The desktop shell's backend; in development outside the desktop app, the one named by Vite's environment. */
+export function getBackendInfo(): Promise<BackendInfo> {
+  backendInfo ??=
+    import.meta.env.DEV && !isTauri()
+      ? import("./devBackend").then((dev) => dev.devBackendInfo())
+      : invoke<BackendInfo>("get_backend_info");
   return backendInfo;
 }
 
@@ -203,4 +213,139 @@ export async function saveRecordingSettings(values: RecordingSettings): Promise<
     return { ok: false, errors };
   }
   return { ok: true, values: (await response.json()) as RecordingSettings };
+}
+
+export interface HistorySettings {
+  keepDays: number;
+}
+
+export async function getHistorySettings(): Promise<{
+  values: HistorySettings;
+  defaults: HistorySettings;
+}> {
+  return (await get<{ values: HistorySettings; defaults: HistorySettings }>("/settings/history"))
+    .body;
+}
+
+/** Saves and applies the settings, or returns the backend's message for each invalid field. */
+export async function saveHistorySettings(
+  values: HistorySettings,
+): Promise<{ ok: true; values: HistorySettings } | { ok: false; errors: { keepDays?: string } }> {
+  const { response } = await request("/settings/history", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(values),
+  });
+  if (response.status === 400) {
+    const problem = (await response.json()) as { errors?: Record<string, string[]> };
+    return { ok: false, errors: { keepDays: problem.errors?.keepDays?.[0] } };
+  }
+  return { ok: true, values: (await response.json()) as HistorySettings };
+}
+
+export interface DelayPoint {
+  minuteUtc: string;
+  p50Ms: number | null;
+  p99Ms: number | null;
+}
+
+export interface DelayHistory {
+  fromUtc: string;
+  toUtc: string;
+  exchanges: { id: number; exchange: string; points: DelayPoint[] }[];
+}
+
+/** Per-minute state as parallel arrays, oldest first; minutes the app was not running are missing. */
+export interface MinuteColumns {
+  /** Start of each minute, Unix milliseconds. */
+  minuteMs: number[];
+  running: number[];
+  valid: number[];
+  invalid: number[];
+  reconnects: number[];
+  gaps: number[];
+}
+
+export interface ExchangeHealth {
+  id: number;
+  exchange: string;
+  /** Valid seconds / running seconds, 0 to 1; null if the app never ran in the range. */
+  uptime: number | null;
+  runningSeconds: number;
+  validSeconds: number;
+  /** Approximate (from coarse histograms, within about 12 %). */
+  delayP50Ms: number | null;
+  delayP99Ms: number | null;
+  delayMaxMs: number | null;
+  bookUpdates: number;
+  trades: number;
+  minutes: MinuteColumns;
+  reconnects: { timeUtc: string; reason: string }[];
+}
+
+export interface HealthHistory {
+  fromUtc: string;
+  toUtc: string;
+  exchanges: ExchangeHealth[];
+}
+
+export interface GapEntry {
+  exchangeId: number;
+  exchange: string;
+  startUtc: string;
+  endUtc: string;
+  durationSeconds: number;
+  kind: "Checksum" | "Sequence" | "Parse" | "ConnectionLost";
+  cause: string;
+  repairAction: string;
+}
+
+export async function getDelayHistory(minutes: number): Promise<DelayHistory> {
+  return (await get<DelayHistory>(`/history/delay?minutes=${minutes}`)).body;
+}
+
+export async function getHealthHistory(hours: number): Promise<HealthHistory> {
+  return (await get<HealthHistory>(`/history/health?hours=${hours}`)).body;
+}
+
+export async function getGaps(hours: number): Promise<GapEntry[]> {
+  return (await get<GapEntry[]>(`/history/gaps?hours=${hours}`)).body;
+}
+
+export type FlowKind = "BookChange" | "Trade";
+export type FlowSide = "Buy" | "Sell";
+
+/** A sampled book change or trade; for a book change the amount is the signed change at its level. */
+export interface FlowItem {
+  /** Unix milliseconds: arrival for a book change, the exchange's time for a trade. */
+  timeMs: number;
+  kind: FlowKind;
+  side: FlowSide;
+  price: number;
+  amount: number;
+}
+
+export interface ExchangeFlowFrame {
+  id: number;
+  exchange: string;
+  pair: string;
+  priceDecimals: number;
+  /** All book changes and trades received in the interval. */
+  bookChanges: number;
+  trades: number;
+  /** Events overwritten before they could be sampled (still counted above). */
+  lost: number;
+  /** Null while the book is not valid. */
+  mid: number | null;
+  /** Best first, [price, amount], at most 12. */
+  bids: [number, number][];
+  asks: [number, number][];
+  /** Oldest first: every trade up to 50 and the 40 largest book changes by notional value. */
+  events: FlowItem[];
+}
+
+export interface FlowFrame {
+  timeUtc: string;
+  intervalSeconds: number;
+  exchanges: ExchangeFlowFrame[];
 }
