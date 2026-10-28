@@ -53,6 +53,13 @@ export function formatProcessing(p50Ns: number | null, p99Ns: number | null): st
   return p50Ns === null || p99Ns === null ? "–" : `${ns(p50Ns)} / ${ns(p99Ns)} ns`;
 }
 
+/** For example "catch-up 23, max 941 ms"; null when no message arrived right after the last snapshot. */
+export function formatCatchUp(count: number, maxDelayMs: number | null): string | null {
+  return count === 0 || maxDelayMs === null
+    ? null
+    : `catch-up ${count}, max ${maxDelayMs.toFixed(0)} ms`;
+}
+
 export function formatGap(gap: BookGap | null): string | undefined {
   if (gap === null) {
     return undefined;

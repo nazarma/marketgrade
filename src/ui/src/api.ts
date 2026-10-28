@@ -66,6 +66,15 @@ export interface ExchangeStatus {
   /** Gaps that started today (UTC). */
   gapsToday: number;
   lastGap: BookGap | null;
+  /** Time from receiving a message to the book worker starting on it, last minute. */
+  queueWaitP50Ns: number | null;
+  queueWaitP99Ns: number | null;
+  /** Messages since the last snapshot that arrived within 100 ms after it; not in the delay figures. */
+  catchUpMessages: number;
+  catchUpMaxDelayMs: number | null;
+  /** Message timestamp minus its oldest change time, last minute; only Coinbase reports it. */
+  exchangeHoldP50Ms: number | null;
+  exchangeHoldP99Ms: number | null;
 }
 
 export interface ConnectionEvent {

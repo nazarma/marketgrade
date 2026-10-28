@@ -3,6 +3,7 @@ import type { BookGap, BookState, ConnectionState } from "./api";
 import {
   bookBadge,
   clockOffset,
+  formatCatchUp,
   formatDelay,
   formatGap,
   formatProcessing,
@@ -58,6 +59,13 @@ describe("formatDelay and formatProcessing", () => {
     expect(formatDelay(null, null)).toBe("–");
     expect(formatProcessing(7264, 43264.4)).toBe("7,264 / 43,264 ns");
     expect(formatProcessing(null, null)).toBe("–");
+  });
+});
+
+describe("formatCatchUp", () => {
+  it("shows the count and the largest delay, or nothing without catch-up", () => {
+    expect(formatCatchUp(23, 941.04)).toBe("catch-up 23, max 941 ms");
+    expect(formatCatchUp(0, null)).toBeNull();
   });
 });
 

@@ -15,6 +15,7 @@ import {
   bookBadge,
   clockOffset,
   formatBytes,
+  formatCatchUp,
   formatDelay,
   formatGap,
   formatProcessing,
@@ -248,6 +249,12 @@ function ExchangeTable({ exchanges }: { exchanges: ExchangeStatus[] }) {
             <th className={heading} title="Exchange timestamp to arrival, last minute">
               Delay p50 / p99
             </th>
+            <th
+              className={heading}
+              title="Message timestamp minus its oldest change time, last minute"
+            >
+              Exchange hold time
+            </th>
             <th className={heading} title="Parse, apply and check one message, last minute">
               Processing p50 / p99
             </th>
@@ -260,6 +267,7 @@ function ExchangeTable({ exchanges }: { exchanges: ExchangeStatus[] }) {
           {exchanges.map((exchange) => {
             const badge = stateBadge(exchange.state);
             const book = bookBadge(exchange.bookState);
+            const catchUp = formatCatchUp(exchange.catchUpMessages, exchange.catchUpMaxDelayMs);
             return (
               <tr key={exchange.id} className="border-t" title={exchange.lastError ?? undefined}>
                 <td className="py-2 font-medium">{exchange.name}</td>
@@ -273,7 +281,27 @@ function ExchangeTable({ exchanges }: { exchanges: ExchangeStatus[] }) {
                 <td className={`${number} text-buy`}>{exchange.bestBid ?? "–"}</td>
                 <td className={`${number} text-sell`}>{exchange.bestAsk ?? "–"}</td>
                 <td className={number}>{exchange.spread ?? "–"}</td>
-                <td className={number}>{formatDelay(exchange.delayP50Ms, exchange.delayP99Ms)}</td>
+                <td className={number}>
+                  {formatDelay(exchange.delayP50Ms, exchange.delayP99Ms)}
+                  {catchUp && (
+                    <div
+                      className="text-xs text-muted-foreground"
+                      title="Messages that arrived within 100 ms after the last snapshot, queued behind it; not in the delay"
+                    >
+                      {catchUp}
+                    </div>
+                  )}
+                </td>
+                <td
+                  className={number}
+                  title={
+                    exchange.exchangeHoldP50Ms === null
+                      ? "This exchange does not report change times"
+                      : undefined
+                  }
+                >
+                  {formatDelay(exchange.exchangeHoldP50Ms, exchange.exchangeHoldP99Ms)}
+                </td>
                 <td className={number}>
                   {formatProcessing(exchange.processingP50Ns, exchange.processingP99Ns)}
                 </td>
