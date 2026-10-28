@@ -47,9 +47,9 @@ public class HotPathBenchmarks
     {
         string[] files = Exchange switch
         {
-            "kraken" => ["kraken/data-book-update.json", "kraken/heartbeat.json"],
-            "coinbase" => ["coinbase/data-l2-update.json", "coinbase/heartbeat.json"],
-            _ => ["binance/data-depth-update.json"],
+            "kraken" => ["kraken/data-book-update.json", "kraken/trade-update.json", "kraken/heartbeat.json"],
+            "coinbase" => ["coinbase/data-l2-update.json", "coinbase/trade-update.json", "coinbase/heartbeat.json"],
+            _ => ["binance/data-depth-update.json", "binance/trade-taker-buy.json"],
         };
         var messages = files.Select(Fixtures.Read).ToArray();
         _stream = new ReplayStream(BuildFrames(messages));

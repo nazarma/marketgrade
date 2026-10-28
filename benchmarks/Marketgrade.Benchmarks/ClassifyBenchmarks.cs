@@ -13,10 +13,13 @@ public class ClassifyBenchmarks
         "kraken/data-book-update.json",
         "kraken/data-book-snapshot.json",
         "kraken/heartbeat.json",
+        "kraken/trade-update.json",
         "coinbase/data-l2-update.json",
         "coinbase/data-l2-snapshot-trimmed.json",
         "coinbase/heartbeat.json",
-        "binance/data-depth-update.json")]
+        "coinbase/trade-update.json",
+        "binance/data-depth-update.json",
+        "binance/trade-taker-buy.json")]
     public string Fixture { get; set; } = "";
 
     [GlobalSetup]

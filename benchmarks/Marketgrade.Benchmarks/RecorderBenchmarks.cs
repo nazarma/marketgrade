@@ -30,9 +30,9 @@ public class RecorderBenchmarks
     {
         string[] files = Exchange switch
         {
-            "kraken" => ["kraken/data-book-update.json", "kraken/heartbeat.json"],
-            "coinbase" => ["coinbase/data-l2-update.json", "coinbase/heartbeat.json"],
-            _ => ["binance/data-depth-update.json"],
+            "kraken" => ["kraken/data-book-update.json", "kraken/trade-update.json", "kraken/heartbeat.json"],
+            "coinbase" => ["coinbase/data-l2-update.json", "coinbase/trade-update.json", "coinbase/heartbeat.json"],
+            _ => ["binance/data-depth-update.json", "binance/trade-taker-buy.json"],
         };
         _messages = [.. files.Select(Fixtures.Read)];
         _pool = new MessageBufferPool(16, 16 * 1024);
