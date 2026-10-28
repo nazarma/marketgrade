@@ -85,6 +85,9 @@ public sealed class MarketEngine : IAsyncDisposable
 
     public IReadOnlyList<ConnectionEvent> GetRecentEvents(int count) => _events.GetRecent(count);
 
+    /// <summary>Every new event as it happens, for one reader that pushes them to the user interface.</summary>
+    public ChannelReader<ConnectionEvent> NewEvents => _events.Added;
+
     /// <summary>Minute statistics, completed gaps and reconnects for persistence; one reader.</summary>
     public HistoryFeed History { get; } = new();
 

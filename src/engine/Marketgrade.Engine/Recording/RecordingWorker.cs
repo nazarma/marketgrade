@@ -134,6 +134,7 @@ internal sealed class RecordingWorker(RecordingManager manager, Func<string, lon
         }
         if (deletedFiles > 0)
         {
+            manager.Events.Add("Recording", "Old recordings deleted", $"{deletedFiles} files, {Size(deletedBytes)}");
             manager.Logger.LogInformation("Deleted {Files} old recordings ({Bytes} bytes)", deletedFiles, deletedBytes);
         }
     }
@@ -198,9 +199,13 @@ internal sealed class RecordingWorker(RecordingManager manager, Func<string, lon
             File.Move(temp, target);
             File.Delete(path);
             var exchange = manager.ExchangeName(file.Exchange);
+            var compressedLength = new FileInfo(target).Length;
             manager.Metrics?.RecordingFilesCompressed.Add(1, new KeyValuePair<string, object?>("exchange", exchange));
+            var hour = RecordingFiles.HourStart(file.Hour);
+            manager.Events.Add(exchange, "Recording compressed",
+                $"{hour:HH:mm} to {hour.AddHours(1):HH:mm} UTC file, {Size(sourceLength)} to {Size(compressedLength)}");
             manager.Logger.LogInformation("Compressed {Path}: {Before} to {After} bytes in {Ms:0} ms",
-                path, sourceLength, new FileInfo(target).Length, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                path, sourceLength, compressedLength, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
             return true;
         }
         catch (OperationCanceledException)
@@ -210,6 +215,7 @@ internal sealed class RecordingWorker(RecordingManager manager, Func<string, lon
         catch (Exception e)
         {
             _failed.Add(path);
+            manager.Events.Add(manager.ExchangeName(file.Exchange), "Recording not compressed", $"{Path.GetFileName(path)} kept uncompressed: {e.Message}");
             manager.Logger.LogWarning("Could not compress {Path}, keeping it uncompressed: {Error}", path, e.Message);
             return false;
         }
@@ -220,6 +226,15 @@ internal sealed class RecordingWorker(RecordingManager manager, Func<string, lon
     }
 
     private static string Gigabytes(long bytes) => $"{bytes / (double)RecordingSettings.GB:0.0} GB";
+
+    /// <summary>Binary units, as the settings and the user interface use.</summary>
+    private static string Size(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
+        < RecordingSettings.GB => $"{bytes / (1024.0 * 1024):0.#} MB",
+        _ => $"{bytes / (double)RecordingSettings.GB:0.##} GB",
+    };
 
     private static (long Records, long Length, string? Error) Scan(RecordingReader reader)
     {

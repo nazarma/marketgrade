@@ -22,6 +22,9 @@ public class CompressionTests
         Assert.False(File.Exists(compressed + ".tmp"));
         Assert.Equal(records, TestRecordings.Read(compressed), new RecordComparer());
         Assert.True(new FileInfo(compressed).Length < TestRecordings.Build(records).Length / 4);
+        var compressedEvent = Assert.Single(harness.Events.GetRecent(10));
+        Assert.Equal("Recording compressed", compressedEvent.Event);
+        Assert.Matches(@"^09:00 to 10:00 UTC file, [\d.,]+ KB to [\d.,]+ (KB|B)$", compressedEvent.Detail);
     }
 
     [Fact]
@@ -39,6 +42,7 @@ public class CompressionTests
 
         Assert.Equal(bytes, File.ReadAllBytes(path));
         Assert.Single(Directory.GetFiles(Path.GetDirectoryName(path)!));
+        Assert.Equal("Recording not compressed", Assert.Single(harness.Events.GetRecent(10)).Event);
     }
 
     [Fact]
