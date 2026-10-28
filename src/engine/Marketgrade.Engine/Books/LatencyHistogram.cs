@@ -21,6 +21,9 @@ public sealed class LatencyHistogram
 
     public long Count { get; private set; }
 
+    /// <summary>The largest value recorded (after <see cref="MaxValue"/> limiting), exact; 0 when empty.</summary>
+    public long Max { get; private set; }
+
     /// <summary>Values below zero, recorded as zero. For delays they mean the clocks disagree.</summary>
     public long Negative { get; private set; }
 
@@ -31,14 +34,20 @@ public sealed class LatencyHistogram
             Negative++;
             value = 0;
         }
-        _counts[IndexOf(Math.Min(value, MaxValue))]++;
+        value = Math.Min(value, MaxValue);
+        _counts[IndexOf(value)]++;
         Count++;
+        if (value > Max)
+        {
+            Max = value;
+        }
     }
 
     public void Clear()
     {
         Array.Clear(_counts);
         Count = 0;
+        Max = 0;
         Negative = 0;
     }
 
@@ -49,7 +58,20 @@ public sealed class LatencyHistogram
             _counts[i] += other._counts[i];
         }
         Count += other.Count;
+        Max = Math.Max(Max, other.Max);
         Negative += other.Negative;
+    }
+
+    /// <summary>Adds every value to <paramref name="coarse"/> (<see cref="CoarseHistogram.Buckets"/> counts), by the middle of its bucket.</summary>
+    public void AddTo(Span<long> coarse)
+    {
+        for (var i = 0; i < _counts.Length; i++)
+        {
+            if (_counts[i] != 0)
+            {
+                coarse[CoarseHistogram.IndexOf(MidpointOf(i))] += _counts[i];
+            }
+        }
     }
 
     /// <summary>The value at <paramref name="percentile"/> (0 to 100): the middle of its bucket, or 0 when empty.</summary>

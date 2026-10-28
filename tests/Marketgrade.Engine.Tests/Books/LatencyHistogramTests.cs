@@ -5,6 +5,34 @@ namespace Marketgrade.Engine.Tests.Books;
 public class LatencyHistogramTests
 {
     [Fact]
+    public void Max_is_exact_and_survives_merging()
+    {
+        var first = new LatencyHistogram();
+        var second = new LatencyHistogram();
+        first.Record(123_456_789);
+        first.Record(7);
+        second.Record(987_654_321);
+        second.Record(-5);
+
+        first.Add(second);
+
+        Assert.Equal(987_654_321, first.Max);
+        first.Clear();
+        Assert.Equal(0, first.Max);
+        Assert.Equal(LatencyHistogram.MaxValue, Record(long.MaxValue).Max);
+    }
+
+    private static LatencyHistogram Record(params long[] values)
+    {
+        var histogram = new LatencyHistogram();
+        foreach (var value in values)
+        {
+            histogram.Record(value);
+        }
+        return histogram;
+    }
+
+    [Fact]
     public void Small_values_are_exact()
     {
         var histogram = new LatencyHistogram();
