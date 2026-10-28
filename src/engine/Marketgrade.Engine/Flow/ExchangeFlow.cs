@@ -6,7 +6,7 @@ namespace Marketgrade.Engine.Flow;
 /// One exchange's live flow for a reader on another thread: its <see cref="FlowRing"/>, running counts of
 /// everything received, and the best levels of its book.
 /// </summary>
-public sealed class ExchangeFlow
+public sealed class ExchangeFlow : IExchangeFlow
 {
     private readonly BookWorker _worker;
 

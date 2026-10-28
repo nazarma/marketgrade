@@ -49,6 +49,8 @@ builder.Services.AddHostedService<EngineHostedService>();
 builder.Services.AddHostedService<ClockOffsetService>();
 builder.Services.AddSingleton<BackendMetrics>();
 builder.Services.AddHostedService<LivePushService>();
+builder.Services.AddSingleton<FlowSubscriptions>();
+builder.Services.AddHostedService<FlowPushService>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 builder.Services.AddSignalR().AddJsonProtocol(options =>
