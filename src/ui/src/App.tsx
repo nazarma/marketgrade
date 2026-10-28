@@ -26,8 +26,12 @@ export default function App() {
     (async () => {
       await getBackendStatus();
       const snapshot = await getEngineStatus();
+      const info = await getBackendInfo();
+      if (!current) {
+        return;
+      }
       useLiveStore.setState((state) => seeded(state, snapshot));
-      await startLive(await getBackendInfo(), (error) =>
+      await startLive(info, (error) =>
         fail(error ?? new Error("The connection to the backend was lost.")),
       );
       if (current) {

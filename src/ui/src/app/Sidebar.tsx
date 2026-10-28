@@ -27,7 +27,7 @@ export function Sidebar() {
     <Tooltip.Provider delayDuration={200}>
       <nav
         aria-label="Main"
-        className={`sticky top-0 flex h-screen shrink-0 flex-col gap-1 border-r border-border py-5 ${
+        className={`flex h-full shrink-0 flex-col gap-1 border-r border-border py-5 ${
           collapsed ? "w-[68px] px-[10px]" : "w-[220px] px-[14px]"
         }`}
       >

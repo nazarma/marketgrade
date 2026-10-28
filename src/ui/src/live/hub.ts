@@ -13,6 +13,8 @@ const RETRY_DELAYS_MS = [0, 1_000, 2_000, 4_000, 8_000, 15_000];
 
 let connection: HubConnection | null = null;
 let flowWanted = false;
+/** Bumped by every start and stop, so a start that was overtaken gives up instead of replacing a newer one. */
+let generation = 0;
 
 /**
  * Connects to the backend's live hub: WebSockets only, without negotiation, with the token in the query
@@ -20,7 +22,11 @@ let flowWanted = false;
  * runs once the connection is gone for good.
  */
 export async function startLive(info: BackendInfo, onLost: (error?: Error) => void): Promise<void> {
-  await stopLive();
+  const mine = ++generation;
+  await stopCurrent();
+  if (mine !== generation) {
+    return;
+  }
   const hub = new HubConnectionBuilder()
     .withUrl(`http://127.0.0.1:${info.port}/hubs/live`, {
       transport: HttpTransportType.WebSockets,
@@ -53,7 +59,18 @@ export async function startLive(info: BackendInfo, onLost: (error?: Error) => vo
 
   connection = hub;
   set({ hub: "connecting" });
-  await hub.start();
+  try {
+    await hub.start();
+  } catch (error) {
+    if (mine !== generation) {
+      return;
+    }
+    throw error;
+  }
+  if (mine !== generation) {
+    await hub.stop();
+    return;
+  }
   set({ hub: "live" });
   if (flowWanted) {
     await hub.invoke("SubscribeFlow");
@@ -61,6 +78,11 @@ export async function startLive(info: BackendInfo, onLost: (error?: Error) => vo
 }
 
 export async function stopLive(): Promise<void> {
+  generation++;
+  await stopCurrent();
+}
+
+async function stopCurrent(): Promise<void> {
   const hub = connection;
   connection = null;
   await hub?.stop();

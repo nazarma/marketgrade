@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -12,14 +13,19 @@ vi.mock("@/api", () => ({
   getEngineStatus: vi.fn(),
   resetBackendInfo: vi.fn(),
   getRecordingSettings: vi.fn(() => new Promise(() => undefined)),
+  getDelayHistory: vi.fn(() => new Promise(() => undefined)),
+  getHealthHistory: vi.fn(() => new Promise(() => undefined)),
+  getGaps: vi.fn(() => new Promise(() => undefined)),
 }));
 vi.mock("@/live/hub", () => ({ startLive: vi.fn(), stopLive: vi.fn(() => Promise.resolve()) }));
 
 const renderApp = () =>
   render(
-    <MemoryRouter initialEntries={["/overview"]}>
-      <App />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={["/overview"]}>
+        <App />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 
 describe("App", () => {

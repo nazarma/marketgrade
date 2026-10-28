@@ -139,11 +139,19 @@ export function formatHours(seconds: number): string {
   return `${days} days ${Math.round(hours - days * 24)} h`;
 }
 
+/**
+ * Unix milliseconds of an ISO 8601 time from the backend. It writes up to seven fractional digits, and not
+ * every web view parses more than three, so the rest is cut off first.
+ */
+export function parseTime(iso: string): number {
+  return Date.parse(iso.replace(/(\.\d{3})\d+/, "$1"));
+}
+
 const two = (n: number) => String(n).padStart(2, "0");
 
 /** Local time of day, "13:41:07", or "13:52:04.118" with milliseconds. */
 export function formatTime(time: Date | string | number, milliseconds = false): string {
-  const date = time instanceof Date ? time : new Date(time);
+  const date = toDate(time);
   if (Number.isNaN(date.getTime())) {
     return NONE;
   }
@@ -153,8 +161,12 @@ export function formatTime(time: Date | string | number, milliseconds = false): 
 
 /** Local hours and minutes, "13:41". */
 export function formatClock(time: Date | string | number): string {
-  const date = time instanceof Date ? time : new Date(time);
+  const date = toDate(time);
   return `${two(date.getHours())}:${two(date.getMinutes())}`;
+}
+
+function toDate(time: Date | string | number): Date {
+  return time instanceof Date ? time : new Date(typeof time === "string" ? parseTime(time) : time);
 }
 
 /** An amount of the base currency with four decimals, "0.0420". */

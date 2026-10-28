@@ -18,5 +18,6 @@ export default defineConfig({
   clearScreen: false,
   test: {
     environment: "node",
+    setupFiles: ["src/test/setup.ts"],
   },
 });
