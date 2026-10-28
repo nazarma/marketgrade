@@ -264,27 +264,55 @@ happened in between; stopping the app is not a gap. Gaps are counted per UTC day
 recorder's queue is full, a `Snapshot` or `BookReset` record is dropped, counted with the dropped
 messages and logged; the replay then reports the Binance range as missing a snapshot.
 
-**Delay and clock offset.** Delay is the arrival time minus the exchange's timestamp of the message
-(Kraken `timestamp`, Coinbase's envelope `timestamp`, Binance `E`), minus the clock offset. The
-backend measures the offset with a small SNTP client (UDP port 123, `time.apple.com`, then
-`pool.ntp.org`) at start and every 10 minutes, and passes it to the engine; the offset is the local
-clock minus NTP time. Without an answer the offset is unknown, delays are shown uncorrected with a
-warning, and the next attempt is after a minute; an offset above 50 ms is shown with a warning too.
-Processing time is measured with `Stopwatch.GetTimestamp()` from before parsing to after the check.
+**Timings.** Every time is measured per message and per exchange:
 
-**Statistics.** Delay and processing time each go into a log-linear histogram per exchange: exact up to
-63 ns, then 64 buckets per power of two, so a percentile is within 1.6 % of the true value; the arrays
-are allocated once. A third histogram measures queue wait: from receiving a message (a monotonic timestamp taken with the
-arrival time) to the worker starting on it. Delay is measured from the arrival time, so queue wait is
-not part of it. A ring of six 10-second histograms covers the last minute (50 to 60 seconds). Once
-per second the worker merges the ring and publishes the median and 99th percentile. A negative delay
-(the clocks disagree) counts as 0.
+- *Arrival time* is the wall-clock time (`DateTime.UtcNow`, Unix nanoseconds) at which the connection
+  has received a message's last byte, before it is queued. A monotonic `Stopwatch` timestamp is taken
+  at the same moment.
+- *Exchange timestamp* is the time the exchange puts on the message: Kraken's `timestamp` in each
+  `data` entry, Coinbase's envelope `timestamp` (when Coinbase sent the message) and Binance's `E`
+  (event time, in milliseconds).
+- *Delay* = arrival time − exchange timestamp − clock offset. It covers the way from the exchange to
+  this computer, nothing after the arrival time. Catch-up messages are not part of it (below).
+- *Catch-up*: a message whose arrival time is at most 100 ms after a snapshot's (the snapshot itself
+  included) is catch-up. For Kraken and Coinbase the snapshot is the WebSocket message that rebuilt
+  the book; for Binance the window starts when the REST snapshot is applied. Coinbase sends its
+  4.5 MB snapshot as one message, and the updates sent while it travels queue behind it and arrive
+  together right after it: their delay is the snapshot's transfer time (300 to 900 ms measured), not
+  the exchange's. Catch-up messages are left out of the delay histogram and counted instead: how
+  many since the last snapshot and their largest delay, both reset by the next snapshot.
+- *Exchange hold time* (Coinbase only) = the message's envelope `timestamp` − the oldest `event_time`
+  of its updates: how long Coinbase held the changes before sending them. Snapshot messages are left
+  out, because their event times are the levels' history; an `event_time` that cannot be read only
+  drops that sample. Kraken and Binance do not report the time of each change.
+- *Queue wait* = from the monotonic timestamp at arrival to the book worker starting on the message.
+- *Processing time* = from before parsing to after the check, with `Stopwatch.GetTimestamp()`.
+
+Measured on a quiet October evening: Coinbase's delay is about 55 ms in steady state, and each connect
+used to push its p99 to 600 to 900 ms for a minute, which is now catch-up; Coinbase holds changes for
+34 ms at the median and about 300 ms at the 99th percentile before sending them. Queue wait is about
+36 µs at the median and 100 µs at the 99th percentile, and 144 ms for the messages that wait while the
+Coinbase snapshot is applied.
+
+**Clock offset.** The backend measures the offset with a small SNTP client (UDP port 123,
+`time.apple.com`, then `pool.ntp.org`) at start and every 10 minutes, and passes it to the engine; the
+offset is the local clock minus NTP time. Without an answer the offset is unknown, delays are shown
+uncorrected with a warning, and the next attempt is after a minute; an offset above 50 ms is shown
+with a warning too. The development machine's clock drifted from 16 to 80 ms behind NTP within a
+few days, which makes uncorrected delays meaningless.
+
+**Statistics.** Delay, exchange hold time, queue wait and processing time each go into a log-linear
+histogram per exchange: exact up to 63 ns, then 64 buckets per power of two, so a percentile is
+within 1.6 % of the true value; the arrays are allocated once. A ring of six 10-second histograms
+covers the last minute (50 to 60 seconds). Once per second the worker merges the ring and publishes
+the median and 99th percentile. A negative value (for a delay, the clocks disagree) counts as 0.
 
 **Status and API.** `GET /engine/status` adds per exchange: book state (`NoPairRules`, `Syncing`,
 `Valid`, `Invalid`), best bid, best ask and spread (text with the pair's decimals), level counts and
 the most seen, delay median and 99th percentile in milliseconds, processing median and 99th
-percentile in nanoseconds, queue wait median and 99th percentile in nanoseconds, gaps today and
-the last gap; and the clock offset for the whole engine.
+percentile in nanoseconds, queue wait median and 99th percentile in nanoseconds, catch-up count
+and largest catch-up delay, exchange hold time median and 99th percentile in milliseconds (Coinbase
+only, null elsewhere), gaps today and the last gap; and the clock offset for the whole engine.
 `GET /books/{exchange}?levels=20` returns up to 100 best levels per side as `[price, amount]` strings,
 from an immutable copy the worker publishes by swapping a reference, so readers never lock. Copies
 are published at most 10 times per second and only while someone has read one in the last
