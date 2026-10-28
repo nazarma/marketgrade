@@ -5,6 +5,7 @@ using System.Text;
 using Marketgrade.Engine.Books;
 using Marketgrade.Engine.Exchanges;
 using Marketgrade.Engine.Flow;
+using Marketgrade.Engine.History;
 using Marketgrade.Engine.Recording;
 using Marketgrade.Engine.Tests.Recording;
 
@@ -73,6 +74,25 @@ public class BookWorkerTests
 
         await engine.StopAsync();
         Assert.Equal(engine.Pool.Created, engine.Pool.Available);
+
+        // The gap, the reconnect it asked for, and the minutes so far are published for the history.
+        Assert.True(engine.History.Gaps.TryRead(out var gap));
+        Assert.Equal(GapKind.Checksum, gap.Kind);
+        Assert.Equal("Reconnected and rebuilt the book from a new snapshot", gap.RepairAction);
+        Assert.Equal(status.LastGap.Cause, gap.Cause);
+        Assert.True(gap.DurationSeconds > 0);
+        Assert.True(engine.History.Reconnects.TryRead(out var reconnect));
+        Assert.StartsWith("Reconnect requested: Checksum mismatch", reconnect.Reason);
+        var minutes = new List<MinuteStats>();
+        while (engine.History.Minutes.TryRead(out var minute))
+        {
+            minutes.Add(minute);
+        }
+        Assert.Equal(engine.Status.Exchanges[0].DataMessages, minutes.Sum(m => m.BookUpdates));
+        Assert.Equal(1, minutes.Sum(m => m.Reconnects));
+        Assert.Equal(1, minutes.Sum(m => m.GapsStarted));
+        Assert.All(minutes, m => Assert.InRange(m.SecondsValid + m.SecondsInvalid, 0, m.SecondsRunning + 1e-9));
+
         await engine.DisposeAsync();
         var records = ReadRecords(tempFolder.Path);
         Assert.Contains(records, r => r.Type == RecordType.BookReset && Encoding.UTF8.GetString(r.Payload).StartsWith("Checksum mismatch", StringComparison.Ordinal));
@@ -205,6 +225,13 @@ public class BookWorkerTests
         Assert.NotNull(status.CatchUpMaxDelayMs);
         await engine.StopAsync();
         Assert.Equal(engine.Pool.Created, engine.Pool.Available);
+
+        // Repaired on the same connection: a gap for the history, no reconnect.
+        Assert.True(engine.History.Gaps.TryRead(out var gap));
+        Assert.Equal(GapKind.Sequence, gap.Kind);
+        Assert.Equal("Rebuilt the book from a new REST snapshot on the same connection", gap.RepairAction);
+        Assert.False(engine.History.Reconnects.TryRead(out _));
+
         await engine.DisposeAsync();
         var records = ReadRecords(tempFolder.Path);
         Assert.Equal(2, records.Count(r => r.Type == RecordType.Snapshot && Encoding.UTF8.GetString(r.Payload).StartsWith("{\"lastUpdateId\":", StringComparison.Ordinal)));

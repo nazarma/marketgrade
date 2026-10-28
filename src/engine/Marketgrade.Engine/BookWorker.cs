@@ -4,6 +4,7 @@ using System.Threading.Channels;
 using Marketgrade.Engine.Books;
 using Marketgrade.Engine.Exchanges;
 using Marketgrade.Engine.Flow;
+using Marketgrade.Engine.History;
 using Marketgrade.Engine.Recording;
 using Microsoft.Extensions.Logging;
 
@@ -57,6 +58,8 @@ internal sealed class BookWorker
     private readonly WindowedHistogram _hold;
     private readonly CancellationTokenSource _stop = new();
     private readonly FlowRing _flow = new();
+    private readonly MinuteRecorder _minutes;
+    private readonly HistoryFeed? _history;
 
     private BookHandler? _handler;
     private Thread? _thread;
@@ -65,6 +68,7 @@ internal sealed class BookWorker
     private long _nextStatistics;
     private long _lastRecordingWarning = LogThrottle.Never;
     private BookGap? _openGap;
+    private GapKind _openGapKind;
     private DateOnly _gapDay;
     private long _version;
     private long _publishedVersion = -1;
@@ -124,7 +128,8 @@ internal sealed class BookWorker
         ILogger logger,
         EngineMetrics? metrics = null,
         ChannelWriter<MessageBuffer>? recorder = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        HistoryFeed? history = null)
     {
         _adapter = adapter;
         _connection = connection;
@@ -144,6 +149,8 @@ internal sealed class BookWorker
         _processing = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
         _queueWait = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
         _hold = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
+        _minutes = new MinuteRecorder(adapter.Id, adapter.Name, (long)options.AsleepAfter.TotalNanoseconds);
+        _history = history;
     }
 
     public ExchangeAdapter Adapter => _adapter;
@@ -313,6 +320,7 @@ internal sealed class BookWorker
         {
             StopFetch();
             (_handler as BinanceBookHandler)?.ReleaseHeld();
+            FlushHistory();
             _done.TrySetResult();
         }
     }
@@ -358,7 +366,7 @@ internal sealed class BookWorker
             }
             else if (outcome == HandleOutcome.Failed)
             {
-                Invalid(_handler.Cause!, buffer.Seq, buffer.ConnectionId, reconnect: _handler is not BinanceBookHandler);
+                Invalid(_handler.Cause!, KindOf(_handler.Failure), buffer.Seq, buffer.ConnectionId, reconnect: _handler is not BinanceBookHandler);
             }
             var exchangeTime = _handler.ExchangeUnixNs;
             if (exchangeTime != 0)
@@ -369,6 +377,7 @@ internal sealed class BookWorker
             if (_handler.ExchangeHoldNs != BookHandler.NoHold)
             {
                 _hold.Record(_handler.ExchangeHoldNs);
+                _minutes.Hold.Record(_handler.ExchangeHoldNs);
             }
             PublishTop();
         }
@@ -377,12 +386,14 @@ internal sealed class BookWorker
         {
             case MessageKind.Data:
                 Interlocked.Increment(ref _dataMessages);
+                _minutes.BookUpdates++;
                 break;
             case MessageKind.Trade:
                 Interlocked.Increment(ref _tradeMessages);
                 if (_handler is not null)
                 {
                     Interlocked.Add(ref _trades, _handler.Trades);
+                    _minutes.Trades += _handler.Trades;
                     Interlocked.Exchange(ref _tradeFailures, _handler.TradeFailures);
                 }
                 break;
@@ -397,9 +408,12 @@ internal sealed class BookWorker
                 break;
         }
         Interlocked.Add(ref _bytes, buffer.Length);
+        _minutes.Bytes += buffer.Length;
         if (_handler is not null)
         {
-            _processing.Record((long)((Stopwatch.GetTimestamp() - start) * s_nsPerTick));
+            var processing = (long)((Stopwatch.GetTimestamp() - start) * s_nsPerTick);
+            _processing.Record(processing);
+            _minutes.Processing.Record(processing);
         }
         if (outcome != HandleOutcome.Held)
         {
@@ -416,6 +430,7 @@ internal sealed class BookWorker
             if (sinceSnapshot >= 0 && sinceSnapshot <= CatchUpWindowNs)
             {
                 Interlocked.Increment(ref _catchUpMessages);
+                _minutes.CatchUp++;
                 if (delayNs > Interlocked.Read(ref _catchUpMaxDelay))
                 {
                     Interlocked.Exchange(ref _catchUpMaxDelay, delayNs);
@@ -424,6 +439,7 @@ internal sealed class BookWorker
             }
         }
         _delay.Record(delayNs);
+        _minutes.Delay.Record(delayNs);
     }
 
     /// <summary>Opens the catch-up window at a snapshot; the counters start again.</summary>
@@ -443,6 +459,11 @@ internal sealed class BookWorker
             _nextStatistics = now + _time.TimestampFrequency;
             PublishStatistics(now);
         }
+        if (_minutes.Advance(UtcNowUnixNs(), _connection.State == ConnectionState.Live, State,
+                _connection.LiveConnectionsEnded, BestBid, BestAsk, Rules) is { } minute)
+        {
+            _history?.Add(minute);
+        }
         if (_handler is null)
         {
             return;
@@ -456,7 +477,7 @@ internal sealed class BookWorker
             && (connection != ConnectionState.Live || _connection.ConnectionId != _lastConnectionId))
         {
             _handler.Invalidate();
-            Invalid(LostCause(), _lastSeq, _lastConnectionId, reconnect: false);
+            Invalid(LostCause(), GapKind.ConnectionLost, _lastSeq, _lastConnectionId, reconnect: false);
             PublishTop();
         }
 
@@ -489,7 +510,7 @@ internal sealed class BookWorker
         if (_lastConnectionId != 0 && _handler!.Book.State == BookState.Valid)
         {
             _handler.Invalidate();
-            Invalid(LostCause(), seq, _lastConnectionId, reconnect: false);
+            Invalid(LostCause(), GapKind.ConnectionLost, seq, _lastConnectionId, reconnect: false);
         }
     }
 
@@ -498,7 +519,7 @@ internal sealed class BookWorker
             ? "New connection"
             : $"Connection lost: {_connection.LastError ?? _connection.State.ToString()}";
 
-    private void Invalid(string cause, long seq, long connectionId, bool reconnect)
+    private void Invalid(string cause, GapKind kind, long seq, long connectionId, bool reconnect)
     {
         Volatile.Write(ref _state, (int)BookState.Invalid);
         _version++;
@@ -512,7 +533,9 @@ internal sealed class BookWorker
                 Volatile.Write(ref _gapsToday, 0);
             }
             Interlocked.Increment(ref _gapsToday);
+            _minutes.GapsStarted++;
             _openGap = new BookGap(now, null, cause, seq, null);
+            _openGapKind = kind;
             Volatile.Write(ref _lastGap, _openGap);
         }
         _logger.LogWarning("{Exchange}: book invalid at message {Seq}: {Cause}", _adapter.Name, seq, cause);
@@ -533,6 +556,7 @@ internal sealed class BookWorker
             var closed = gap with { EndUtc = _time.GetUtcNow().UtcDateTime, EndSeq = _lastSeq };
             _openGap = null;
             Volatile.Write(ref _lastGap, closed);
+            _history?.Add(new GapRecord(_adapter.Id, _adapter.Name, gap.StartUtc, closed.EndUtc.Value, _openGapKind, gap.Cause, RepairAction(_openGapKind)));
             _logger.LogInformation("{Exchange}: book valid again after {Seconds:0.0} s ({Cause})", _adapter.Name, closed.DurationSeconds, gap.Cause);
             _events.Add(_adapter.Name, "Book valid", $"gap of {closed.DurationSeconds:0.0} s: {gap.Cause}");
         }
@@ -542,6 +566,37 @@ internal sealed class BookWorker
             _events.Add(_adapter.Name, "Book synced");
         }
     }
+
+    private static GapKind KindOf(FailureKind failure) => failure switch
+    {
+        FailureKind.Checksum => GapKind.Checksum,
+        FailureKind.Sequence => GapKind.Sequence,
+        _ => GapKind.Parse,
+    };
+
+    private string RepairAction(GapKind kind) => (_handler is BinanceBookHandler, kind) switch
+    {
+        (true, GapKind.ConnectionLost) => "Reconnected and rebuilt the book from a new REST snapshot",
+        (true, _) => "Rebuilt the book from a new REST snapshot on the same connection",
+        _ => "Reconnected and rebuilt the book from a new snapshot",
+    };
+
+    /// <summary>As the worker stops: the minute so far, and a gap still open, which ends here.</summary>
+    private void FlushHistory()
+    {
+        if (_minutes.Flush(UtcNowUnixNs(), _connection.State == ConnectionState.Live, State,
+                _connection.LiveConnectionsEnded, BestBid, BestAsk, Rules) is { } minute)
+        {
+            _history?.Add(minute);
+        }
+        if (_openGap is { } gap)
+        {
+            _history?.Add(new GapRecord(_adapter.Id, _adapter.Name, gap.StartUtc, _time.GetUtcNow().UtcDateTime, _openGapKind, gap.Cause,
+                "The app was closed before the book was repaired"));
+        }
+    }
+
+    private long UtcNowUnixNs() => (_time.GetUtcNow().UtcTicks - DateTime.UnixEpoch.Ticks) * 100;
 
     private void PublishTop()
     {
@@ -605,7 +660,7 @@ internal sealed class BookWorker
                 }
                 else if (outcome == HandleOutcome.Failed)
                 {
-                    Invalid(binance.Cause!, _lastSeq, _lastConnectionId, reconnect: false);
+                    Invalid(binance.Cause!, KindOf(binance.Failure), _lastSeq, _lastConnectionId, reconnect: false);
                 }
                 PublishTop();
             }

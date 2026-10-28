@@ -74,6 +74,9 @@ public sealed record EngineOptions
 
     public TimeSpan BinanceSnapshotTimeout { get; init; } = TimeSpan.FromSeconds(10);
 
+    /// <summary>A longer pause between the book worker's housekeeping passes (the computer slept) counts as time the app was not running.</summary>
+    public TimeSpan AsleepAfter { get; init; } = TimeSpan.FromSeconds(5);
+
     /// <summary>How often the book worker checks its connection, rotates statistics and publishes them while no message arrives.</summary>
     public TimeSpan BookHousekeepingInterval { get; init; } = TimeSpan.FromMilliseconds(250);
 }

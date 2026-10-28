@@ -3,6 +3,7 @@ using System.Diagnostics.Metrics;
 using System.Threading.Channels;
 using Marketgrade.Engine.Books;
 using Marketgrade.Engine.Flow;
+using Marketgrade.Engine.History;
 using Marketgrade.Engine.Recording;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -64,9 +65,9 @@ public sealed class MarketEngine : IAsyncDisposable
             var book = new Queue("book", options.QueueCapacity, signaled: true);
             var recorder = _recording is null ? null : new Queue("recorder", options.RecorderQueueCapacity);
             var connection = new ExchangeConnection(
-                adapter, Pool, [book.Writer], options, _events, _metrics, _logger, recorder?.Writer);
+                adapter, Pool, [book.Writer], options, _events, _metrics, _logger, recorder?.Writer, History);
             var worker = new BookWorker(adapter, connection, book.Channel.Reader, book.Signal, Pool, _http, _clockOffset,
-                options, _events, _logger, _metrics, recorder?.Writer);
+                options, _events, _logger, _metrics, recorder?.Writer, history: History);
             return new Feed(adapter, connection, worker, book, _recording?.AddRecorder(adapter), recorder);
         })];
 
@@ -83,6 +84,9 @@ public sealed class MarketEngine : IAsyncDisposable
     public EngineStatus Status => Volatile.Read(ref _status);
 
     public IReadOnlyList<ConnectionEvent> GetRecentEvents(int count) => _events.GetRecent(count);
+
+    /// <summary>Minute statistics, completed gaps and reconnects for persistence; one reader.</summary>
+    public HistoryFeed History { get; } = new();
 
     /// <summary>Each exchange's live flow, in the order of <see cref="Adapters"/>.</summary>
     public IReadOnlyList<ExchangeFlow> Flows { get; }

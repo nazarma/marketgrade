@@ -4,6 +4,7 @@ using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Threading.Channels;
+using Marketgrade.Engine.History;
 using Marketgrade.Engine.Recording;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -26,6 +27,7 @@ public sealed class ExchangeConnection
     private readonly ConnectionEventLog _events;
     private readonly EngineMetrics? _metrics;
     private readonly ILogger _logger;
+    private readonly HistoryFeed? _history;
     private readonly TagList _exchangeTag;
     private readonly CancellationTokenSource _stop = new();
 
@@ -34,6 +36,7 @@ public sealed class ExchangeConnection
     private long _seq;
     private long _lastMessageTimestamp;
     private int _reconnectCount;
+    private long _liveConnectionsEnded;
     private long _recordingDropped;
 
     /// <summary>Messages dropped for the recorder since the last record it got; stamped onto the next one.</summary>
@@ -52,8 +55,10 @@ public sealed class ExchangeConnection
         ConnectionEventLog events,
         EngineMetrics? metrics = null,
         ILogger? logger = null,
-        ChannelWriter<MessageBuffer>? recorder = null)
+        ChannelWriter<MessageBuffer>? recorder = null,
+        HistoryFeed? history = null)
     {
+        _history = history;
         _adapter = adapter;
         _pool = pool;
         _writers = writers;
@@ -73,6 +78,9 @@ public sealed class ExchangeConnection
 
     /// <summary>Reconnects after failures. Scheduled closes by the exchange are not counted.</summary>
     public int ReconnectCount => Volatile.Read(ref _reconnectCount);
+
+    /// <summary>Live connections that ended, for any reason but stopping, scheduled closes included; each is also published to the history feed.</summary>
+    public long LiveConnectionsEnded => Interlocked.Read(ref _liveConnectionsEnded);
 
     public string? LastError => Volatile.Read(ref _lastError);
 
@@ -126,6 +134,13 @@ public sealed class ExchangeConnection
                 if (end.Kind == EndKind.Stopped || stopToken.IsCancellationRequested)
                 {
                     break;
+                }
+
+                if (end.LiveFor > TimeSpan.Zero)
+                {
+                    Interlocked.Increment(ref _liveConnectionsEnded);
+                    _history?.Add(new ReconnectRecord(_adapter.Id, _adapter.Name, DateTime.UtcNow,
+                        end.Detail is null ? end.Event : $"{end.Event}: {end.Detail}"));
                 }
 
                 TimeSpan delay;
