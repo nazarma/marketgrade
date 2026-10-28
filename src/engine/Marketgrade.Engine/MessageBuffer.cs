@@ -15,6 +15,9 @@ public sealed class MessageBuffer
     public long ConnectionId;
     public long Seq;
     public long ArrivalUnixNs;
+
+    /// <summary><see cref="System.Diagnostics.Stopwatch"/> timestamp taken with <see cref="ArrivalUnixNs"/>, for the time spent in queues.</summary>
+    public long ReceivedTimestamp;
     public int Counter;
 
     /// <summary>Anything but <see cref="RecordType.Message"/> goes to the recorder only.</summary>

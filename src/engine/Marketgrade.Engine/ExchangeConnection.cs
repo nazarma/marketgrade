@@ -315,6 +315,7 @@ public sealed class ExchangeConnection
                 buffer.ConnectionId = connectionId;
                 buffer.Seq = ++_seq;
                 buffer.ArrivalUnixNs = (DateTime.UtcNow.Ticks - DateTime.UnixEpoch.Ticks) * 100;
+                buffer.ReceivedTimestamp = Stopwatch.GetTimestamp();
                 buffer.Counter = _recorder is null ? _writers.Length : _writers.Length + 1;
                 _metrics?.MessagesReceived.Add(1, _exchangeTag);
                 _metrics?.BytesReceived.Add(received, _exchangeTag);

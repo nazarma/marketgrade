@@ -58,6 +58,7 @@ public class BookWorkerTests
         Assert.StartsWith("Checksum mismatch: Kraken sent", status.LastGap!.Cause);
         Assert.Equal(2, server.Connections.Count);
         Assert.True(status.ProcessingP99Ns >= status.ProcessingP50Ns);
+        Assert.True(status.QueueWaitP99Ns >= status.QueueWaitP50Ns && status.QueueWaitP50Ns > 0);
         Assert.True(Decimal(status.BestBid) < Decimal(status.BestAsk));
         Assert.Equal(Decimal(status.BestAsk) - Decimal(status.BestBid), Decimal(status.Spread));
         Assert.Equal(KrakenAdapter.BookDepth, status.BidLevels);

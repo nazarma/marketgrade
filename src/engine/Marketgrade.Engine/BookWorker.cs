@@ -46,6 +46,7 @@ internal sealed class BookWorker
     private readonly TaskCompletionSource _done = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly WindowedHistogram _delay;
     private readonly WindowedHistogram _processing;
+    private readonly WindowedHistogram _queueWait;
     private readonly CancellationTokenSource _stop = new();
 
     private BookHandler? _handler;
@@ -79,6 +80,8 @@ internal sealed class BookWorker
     private long _delayCount;
     private long _processingP50;
     private long _processingP99;
+    private long _queueWaitP50 = -1;
+    private long _queueWaitP99 = -1;
     private int _gapsToday;
     private BookGap? _lastGap;
     private long _lastRead = long.MinValue;
@@ -119,6 +122,7 @@ internal sealed class BookWorker
         var now = _time.GetTimestamp();
         _delay = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
         _processing = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
+        _queueWait = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
     }
 
     public ExchangeAdapter Adapter => _adapter;
@@ -167,6 +171,11 @@ internal sealed class BookWorker
     public long ProcessingP50Ns => Interlocked.Read(ref _processingP50);
 
     public long ProcessingP99Ns => Interlocked.Read(ref _processingP99);
+
+    /// <summary>Time from receiving a message to the worker starting on it, over the last minute; 0 without data.</summary>
+    public long QueueWaitP50Ns => Interlocked.Read(ref _queueWaitP50);
+
+    public long QueueWaitP99Ns => Interlocked.Read(ref _queueWaitP99);
 
     /// <summary>Gaps that started today (UTC).</summary>
     public int GapsToday => Volatile.Read(ref _gapsToday);
@@ -248,6 +257,7 @@ internal sealed class BookWorker
         Debug.Assert(buffer.Length > 0, "Buffer was released before this consumer read it");
         Debug.Assert(buffer.Type == RecordType.Message, "Connection records go to the recorder only");
         var start = Stopwatch.GetTimestamp();
+        _queueWait.Record((long)((start - buffer.ReceivedTimestamp) * s_nsPerTick));
         var outcome = HandleOutcome.Ignored;
         MessageKind kind;
         if (_handler is null)
@@ -435,6 +445,7 @@ internal sealed class BookWorker
     {
         _delay.Rotate(now);
         _processing.Rotate(now);
+        _queueWait.Rotate(now);
         var delay = _delay.Merge();
         Interlocked.Exchange(ref _delayP50, delay.Percentile(50));
         Interlocked.Exchange(ref _delayP99, delay.Percentile(99));
@@ -442,6 +453,9 @@ internal sealed class BookWorker
         var processing = _processing.Merge();
         Interlocked.Exchange(ref _processingP50, processing.Percentile(50));
         Interlocked.Exchange(ref _processingP99, processing.Percentile(99));
+        var queueWait = _queueWait.Merge();
+        Interlocked.Exchange(ref _queueWaitP50, queueWait.Count > 0 ? queueWait.Percentile(50) : -1);
+        Interlocked.Exchange(ref _queueWaitP99, queueWait.Count > 0 ? queueWait.Percentile(99) : -1);
         if (_gapDay != default && DateOnly.FromDateTime(_time.GetUtcNow().UtcDateTime) != _gapDay)
         {
             _gapDay = default;

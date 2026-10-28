@@ -274,14 +274,17 @@ Processing time is measured with `Stopwatch.GetTimestamp()` from before parsing 
 
 **Statistics.** Delay and processing time each go into a log-linear histogram per exchange: exact up to
 63 ns, then 64 buckets per power of two, so a percentile is within 1.6 % of the true value; the arrays
-are allocated once. A ring of six 10-second histograms covers the last minute (50 to 60 seconds). Once
+are allocated once. A third histogram measures queue wait: from receiving a message (a monotonic timestamp taken with the
+arrival time) to the worker starting on it. Delay is measured from the arrival time, so queue wait is
+not part of it. A ring of six 10-second histograms covers the last minute (50 to 60 seconds). Once
 per second the worker merges the ring and publishes the median and 99th percentile. A negative delay
 (the clocks disagree) counts as 0.
 
 **Status and API.** `GET /engine/status` adds per exchange: book state (`NoPairRules`, `Syncing`,
 `Valid`, `Invalid`), best bid, best ask and spread (text with the pair's decimals), level counts and
 the most seen, delay median and 99th percentile in milliseconds, processing median and 99th
-percentile in nanoseconds, gaps today and the last gap; and the clock offset for the whole engine.
+percentile in nanoseconds, queue wait median and 99th percentile in nanoseconds, gaps today and
+the last gap; and the clock offset for the whole engine.
 `GET /books/{exchange}?levels=20` returns up to 100 best levels per side as `[price, amount]` strings,
 from an immutable copy the worker publishes by swapping a reference, so readers never lock. Copies
 are published at most 10 times per second and only while someone has read one in the last

@@ -17,7 +17,8 @@ internal static class StatusTable
         {
             Console.WriteLine(
                 $"  {e.Name,-9} book {e.BookState,-11} bid {e.BestBid ?? "-",10} ask {e.BestAsk ?? "-",10} " +
-                $"delay {Ms(e.DelayP50Ms)}/{Ms(e.DelayP99Ms)} ms  processing {e.ProcessingP50Ns?.ToString() ?? "-"}/{e.ProcessingP99Ns?.ToString() ?? "-"} ns  " +
+                $"delay {Ms(e.DelayP50Ms)}/{Ms(e.DelayP99Ms)} ms  queue {e.QueueWaitP50Ns?.ToString() ?? "-"}/{e.QueueWaitP99Ns?.ToString() ?? "-"} ns  " +
+                $"processing {e.ProcessingP50Ns?.ToString() ?? "-"}/{e.ProcessingP99Ns?.ToString() ?? "-"} ns  " +
                 $"levels {e.BidLevels}/{e.AskLevels}  gaps {e.GapsToday}{(e.LastGap is { } gap ? $" (last: {gap.Cause})" : "")}");
         }
         Console.WriteLine($"  Clock offset: {(status.ClockOffsetMs is { } offset ? $"{offset:0.0} ms" : "unknown, delays uncorrected")}");
