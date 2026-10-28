@@ -6,11 +6,38 @@ Marketgrade is a desktop application. The user interface is written in React and
 runs inside a Tauri 2 window. Tauri keeps the installer small and uses the operating system's web
 view, and its Rust side is responsible for starting and stopping the backend.
 
+**Screens.** A 220 px sidebar (icons with tooltips below 1,200 px) leads to Overview, Live flow, Data
+health and Settings; the window opens at 1440 x 900 and is at least 1200 x 760. Navigation uses React
+Router in library mode with hash URLs, which work from the app's files and in a browser alike. REST
+calls go through TanStack Query (history, settings); everything the backend pushes goes into one
+Zustand store. Charts use uPlot; the Live flow animation uses PixiJS 8 with WebGL. The design tokens
+(colours, the exchanges' colours, Geist and Geist Mono with tabular figures for every number) are CSS
+variables; the app is dark only. Every status has text, every chart pairs colour with a dash pattern
+or a label, and keyboard focus is visible.
+
+**Live flow.** One canvas with three lanes. The screen draws the sample the backend sends (see Live
+push), spread over each 100 ms as the events happened: sell book changes fall from the top and buy
+changes rise from the bottom to their price on a scale of about 0.15 % around the mid price, sized by
+notional value on a log scale; removals fade where they are; trades are rings at the mid line. The
+best 12 levels per side are depth bars behind them, spread out from the mid where they would overlap.
+A fixed pool of 2,000 sprites is reused, with particle state in typed arrays, so the animation loop
+allocates nothing; when every sprite is busy a new particle is skipped and counted. The screen
+subscribes to the flow only while it is open and the window visible, and stops its render loop
+otherwise; Pause freezes the animation while the data keeps coming, and with reduced motion it shows
+a still view. PixiJS generates code with `new Function` unless `pixi.js/unsafe-eval` is loaded, which
+the app's Content Security Policy requires. The screen and PixiJS load when Live flow is first opened.
+
+**Browser mode.** For automated screenshots the user interface also runs in a normal browser
+against a backend started by hand (see the README): only in the Vite dev server and only outside
+Tauri, it takes the backend's port and token from `VITE_BACKEND_PORT` and `VITE_BACKEND_TOKEN`
+instead of asking Tauri. The module that does this is imported behind `import.meta.env.DEV`, so a
+production build does not contain it.
+
 ## Backend process
 
 All market logic runs in a single .NET 10 process that Tauri starts as a child process. It
 contains the engine (exchange connections, order books, recording) and an ASP.NET Core API that
-serves REST endpoints and, later, SignalR streams to the user interface. The engine is a separate
+serves REST endpoints and a SignalR hub (see Live push) to the user interface. The engine is a separate
 class library without any ASP.NET Core dependency, so it stays independent of how its data is
 served.
 
@@ -19,8 +46,12 @@ served.
 The API listens on `127.0.0.1` only, on a port chosen by the operating system, so it is never
 reachable from another computer. On every start Tauri generates a random secret token and passes
 it to the backend in an environment variable. Every request must carry it as a bearer token, so
-other programs on the same computer cannot use the API either. CORS allows only the Tauri origins
-and the Vite dev server.
+other programs on the same computer cannot use the API either. Browsers cannot set headers on a
+WebSocket, so for paths under `/hubs/live` only, the token may instead be the `access_token` query
+parameter; anywhere else a query token is rejected. Nothing logs request URLs (ASP.NET Core logs
+warnings only), and a test checks that the token never appears in the logs. CORS allows only the
+Tauri origins and the Vite dev server. `MARKETGRADE_PORT` fixes the port for the browser mode; the
+desktop shell never sets it.
 
 ## Start-up handshake
 
@@ -41,18 +72,23 @@ fixed for now.
 **Adapters.** Everything that differs between exchanges lives in one adapter class per exchange: the
 URL, the subscribe messages (UTF-8 bytes built once) and `Classify`, which sorts a raw message into
 data, heartbeat, control or error. `Classify` reads only the top-level JSON properties with
-`Utf8JsonReader` and never allocates. Connection, queues and consumers are shared code.
+`Utf8JsonReader` and never allocates; it sorts a message into book data, trade, heartbeat, control or
+error. Connection, queues and consumers are shared code.
 
-- Kraken: one `book` subscription with depth 1000. Kraken v2 has no heartbeat subscription; heartbeats
-  arrive about once a second as soon as any channel is subscribed. Kraken does not restore
-  subscriptions after a reconnect, so they are sent on every connection.
-- Coinbase: two subscribe messages, because Coinbase accepts one channel per message: `level2` and
-  `heartbeats`. Without the heartbeats channel Coinbase closes quiet connections. The level2 snapshot
-  is a single message of several megabytes.
-- Binance: the stream is named in the URL, so nothing is sent. We use the market-data-only host
-  `data-stream.binance.vision` (port 443) rather than `stream.binance.com:9443`: it serves the same
-  public streams, has no account features, and port 443 passes restrictive networks. Binance sends a
-  ping frame every 20 seconds; `ClientWebSocket` answers pings with pongs by itself.
+- Kraken: a `book` subscription with depth 1000 and a `trade` subscription without its snapshot of the
+  last 50 trades. Kraken v2 has no heartbeat subscription; heartbeats arrive about once a second as
+  soon as any channel is subscribed. Kraken does not restore subscriptions after a reconnect, so they
+  are sent on every connection.
+- Coinbase: three subscribe messages, because Coinbase accepts one channel per message: `level2`,
+  `market_trades` and `heartbeats`. Without the heartbeats channel Coinbase closes quiet connections.
+  The level2 snapshot is a single message of several megabytes.
+- Binance: the depth stream is named in the URL, and `{"method":"SUBSCRIBE","params":["btcusdt@trade"],"id":1}`
+  adds the trade stream after connecting (answered with `{"result":null,"id":1}`). A raw `/ws/`
+  connection keeps payloads unwrapped after a subscribe, so both arrive as plain events. We use the
+  market-data-only host `data-stream.binance.vision` (port 443) rather than `stream.binance.com:9443`:
+  it serves the same public streams, has no account features, and port 443 passes restrictive
+  networks. Binance sends a ping frame every 20 seconds; `ClientWebSocket` answers pings with pongs by
+  itself.
 
 **Buffers.** Each message is received into a `MessageBuffer` from a pool of 1,024 buffers of 16 KB
 created at startup. A larger message continues in an array rented from `ArrayPool<byte>.Shared`,
@@ -82,8 +118,9 @@ still records it, with reason `scheduled`.
 
 **Status and metrics.** Once per second the engine builds an immutable `EngineStatus` (state, data
 messages and bytes per second, time since the last message, reconnects, last error per exchange) and
-publishes it by swapping a reference, so readers never lock. Messages per second counts data messages
-only. The backend serves it at `GET /engine/status`. The `Marketgrade.Engine` meter has the counters
+publishes it by swapping a reference, so readers never lock. Messages per second counts book data
+messages only (the user interface calls them book updates); trade messages, trades and trades per
+second are counted separately. The backend serves it at `GET /engine/status`. The `Marketgrade.Engine` meter has the counters
 `messages_received`, `bytes_received`, `reconnects` and `pool_misses` and the gauges `queue_length`
 and `connection_state`, all tagged by exchange.
 
@@ -288,6 +325,10 @@ messages and logged; the replay then reports the Binance range as missing a snap
 - *Queue wait* = from the monotonic timestamp at arrival to the book worker starting on the message.
 - *Processing time* = from before parsing to after the check, with `Stopwatch.GetTimestamp()`.
 
+Kraken's book timestamps are often later than our clock-corrected arrival time, so its median delay
+shows as 0 ms (the 99th percentile was about 20 ms, before and after step 5): Kraken's clock appears
+to run ahead of NTP time by more than the network delay to it.
+
 Measured on a quiet October evening: Coinbase's delay is about 55 ms in steady state, and each connect
 used to push its p99 to 600 to 900 ms for a minute, which is now catch-up; Coinbase holds changes for
 34 ms at the median and about 300 ms at the 99th percentile before sending them. Queue wait is about
@@ -327,6 +368,43 @@ recorded time for a snapshot (longer than the 10-second limit plus the 10-second
 that range as missing a snapshot instead of counting failures. A recorded minute per exchange is
 replayed in the tests.
 
+**Trades.** Each book handler also reads its exchange's trades with the same parsers: time (the
+exchange's time of the trade), price, amount and the side of the order that took liquidity. Kraken
+reports the taker's side. Coinbase's `side` is documented as the maker's side, and live trades
+confirm it (437 of 442 trades were at the price that side implies, against the best bid and ask just
+before), so the taker is the other side. On Binance `m` says whether the buyer was the maker; if so
+the taker sold. Trades an exchange sends as history right after subscribing (Kraken's snapshot,
+Coinbase's `snapshot` event) are skipped. Trades never touch the book or its check, and a trade
+message that cannot be read is counted and skipped. The exception is Coinbase: its `market_trades`
+messages are part of the connection's `sequence_num` sequence, like heartbeats, so they keep the
+sequence check going, and one that cannot be read before its `sequence_num` fails the book because
+its place in the sequence is unknown. Trade messages do not add delay samples. Replay counts trades.
+
+**Flow.** Each book worker keeps a preallocated ring of 4,096 flow events (`long` time, `byte` kind,
+`byte` side, `long` price, `long` amount; 32 bytes each). It writes a trade event for every trade, and
+for every update that changes a level of a valid book within 0.25 % of the mid price a book change
+event with the signed change in amount at that level (`OrderBookSide.Set` returns the previous
+amount); snapshots rebuild the book and write nothing. Every change to a valid book is also counted,
+at any distance from the mid. The worker is the only writer: it stores the event, then the number of
+events written with `Interlocked.Exchange`, a full barrier, so a reader that sees N knows that only
+the slot of event N may be changing. A reader copies a range by sequence number, re-reads the count
+and leaves out every event the writer may have overwritten meanwhile, reporting how many. The rings
+are written only while the backend asks for the flow; the counts go on either way.
+
+**Per-minute statistics.** Besides the one-minute window of the status, each worker fills a second
+set of preallocated histograms (delay, processing, exchange hold time) and counters for the current
+UTC minute. At each housekeeping pass (at least every 250 ms) it adds the time since the previous
+pass to the connection and book state of that moment, so a minute knows how long the app ran and how
+long the connection was live and the book valid or invalid; waiting for a snapshot is neither. A
+pause of more than 5 seconds (the computer slept) or a clock moved back is not running time. When the
+minute is over the worker publishes a `MinuteStats`: those seconds, book updates, trades, bytes, the
+delay median, 99th percentile and exact maximum, the delays in 48 coarse buckets, processing and hold
+time percentiles, catch-up messages, reconnects, gaps started and the closing best bid, ask and
+spread. The minute the engine stops in is published too. Each completed gap is published once with
+its kind, cause and repair action (a gap still open at stop ends there), and each live connection
+that ends as a reconnect with its reason. All three go to bounded queues that keep the newest
+records; the engine only ever calls `TryWrite`.
+
 **Measured.**
 
 On the development machine (Intel Core i7-9750H), with 500 real messages after the first valid
@@ -340,7 +418,9 @@ allocated:
 | Binance  |              9.4 µs |            9.5 µs |
 
 The whole worker path adds classifying, statistics and the release; Kraken's numbers vary between
-runs (standard deviation about 1.4 µs). Parsing one decimal takes 27 ns, one ISO 8601 timestamp 35 ns,
+runs (standard deviation about 1.4 µs). With the flow rings on, the worker path is 0.1 to 0.2 µs
+slower; writing one flow event takes about 12 ns. Handling one trade message (classify, parse, write
+to the ring) takes 0.5 to 0.6 µs. All of these allocate nothing. Parsing one decimal takes 27 ns, one ISO 8601 timestamp 35 ns,
 and the Kraken checksum 400 ns. Receiving, queueing, waking the worker, classifying and releasing a
 message (the hot path benchmark, without a book) stay at 530 to 600 ns, 680 to 820 ns with recording.
 
@@ -368,7 +448,51 @@ are an ordered list applied at startup. `GET /settings/recording` returns the va
 
 **Recordings.** Binary append-only files, by default in `<data folder>/recordings` (see Recording).
 
-A later step adds DuckDB for chart history.
+**History.** Chart history lives in DuckDB at `<data folder>/history.duckdb` (DuckDB.NET), in three
+tables: `minute_stats` (every `MinuteStats` field, the coarse delay histogram as a `BIGINT[]` list),
+`gaps` and `reconnects`; a `schema` table holds the migrations applied. One background writer, never
+an engine thread, reads the engine's queues: after the first row of a minute it waits a second, so all
+exchanges' rows of that minute go in one transaction, and it adds gaps and reconnects as they arrive.
+It is registered before the engine, so it stops after it and saves what the engine published while
+stopping. One connection is used under a lock: a few rows a minute and rare reads never wait long.
+At start and then daily it deletes history older than "Keep history for" (a History settings section,
+7 to 3,650 days, default 90, stored like the recording settings); a change applies at once.
+
+- A minute without a row is a minute the app was not running, and the user interface shows it as
+  no data, never as down. A minute with two rows (the app restarted within it) is added up.
+- *Uptime* over a range is the seconds with a valid book divided by the seconds the app was running;
+  the tooltip says how many hours it ran.
+- Delay percentiles over a range come from the minutes' coarse histograms added up: 48 buckets of
+  equal ratio (about 1.257) from 1 ms to 60 s, with the geometric middle of a bucket as the value, so
+  they are approximate, within about 12 %. Values under 1 ms count in the first bucket and show as
+  about 1.1 ms. The worst delay is exact.
+
+`GET /history/delay?minutes=60` returns the median and 99th percentile per exchange and minute;
+`GET /history/health?hours=24` (up to 168) the running, valid and invalid seconds, reconnects and gaps
+per minute as parallel arrays, the reconnects with their reasons and the range's aggregates; and
+`GET /history/gaps?hours=24` the gaps newest first.
+
+DuckDB's macOS library is a universal binary of 117 MB, which makes the published sidecar 221 MB
+instead of about 104 MB; keeping only the target's architecture would save about 58 MB.
+
+## Live push
+
+The SignalR hub `/hubs/live` (JSON protocol, enums as strings) replaces polling. The user interface
+reads `/engine/status` once for its first state, then connects with WebSockets only, without
+negotiation, and the token in the query string; it reconnects after 0, 1, 2, 4, 8 and 15 seconds and
+then shows the backend-unreachable screen.
+
+| Message | To | When | Content |
+| ------- | -- | ---- | ------- |
+| `status` | every client | once per second | the full `EngineStatus` |
+| `event` | every client | as it happens | a connection, book or recording event (for example "09:00 to 10:00 UTC file, 214 MB to 31 MB") |
+| `flow` | clients that called `SubscribeFlow` | every 100 ms | per exchange: counts of all book changes and trades in the interval, a sample, events overwritten before sampling, the mid price and 12 levels per side |
+
+The sample is every trade up to 50 and the 40 largest book changes by notional value, oldest first.
+While at least one client is subscribed the backend turns on the engine's flow rings and samples them
+every 100 ms; `UnsubscribeFlow` or a closed connection ends a subscription, and without one nothing is
+sampled, sent or written to the rings. The hub messages sent are counted by type in the
+`Marketgrade.Backend` meter (`hub_messages_sent`), and the user interface counts what it receives.
 
 ## Repository
 

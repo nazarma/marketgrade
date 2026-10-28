@@ -8,9 +8,11 @@ Kraken, Coinbase and Binance.
 **Status: early development.** The engine connects to Kraken, Coinbase and Binance, reconnects when a
 connection dies, and records every message to compressed hourly files. It keeps a live order book per
 exchange, checks every update with the exchange's own method (checksum, sequence numbers or update
-IDs), repairs a broken book by itself, and measures delay and processing time. The desktop window
-shows each exchange's state, book, best prices, delay and gaps, and the Settings screen controls
-recording.
+IDs), repairs a broken book by itself, and measures delay and processing time. It also reads every
+public trade and keeps per-minute history in DuckDB. The desktop app has four screens: Overview
+(each exchange's state, delay, gaps, uptime, best prices and recent events), Live flow (an animation
+of book changes and trades as they arrive), Data health (a connection timeline, delay and volume, and
+the gap log) and Settings (recording and history).
 
 ## Prerequisites
 
