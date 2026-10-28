@@ -59,11 +59,11 @@ internal sealed class KrakenBookHandler(ExchangeAdapter adapter, PairRules rules
                     {
                         if (reader.ValueTextEquals("bids"u8))
                         {
-                            ReadLevels(ref reader, Book.Bids);
+                            ReadLevels(ref reader, Book.Bids, isSnapshot);
                         }
                         else if (reader.ValueTextEquals("asks"u8))
                         {
-                            ReadLevels(ref reader, Book.Asks);
+                            ReadLevels(ref reader, Book.Asks, isSnapshot);
                         }
                         else if (reader.ValueTextEquals("checksum"u8))
                         {
@@ -184,7 +184,7 @@ internal sealed class KrakenBookHandler(ExchangeAdapter adapter, PairRules rules
         AddTrade(time, taker, price, qty);
     }
 
-    private void ReadLevels(ref Utf8JsonReader reader, OrderBookSide side)
+    private void ReadLevels(ref Utf8JsonReader reader, OrderBookSide side, bool snapshot)
     {
         var rules = Book.Rules;
         Expect(ref reader, JsonTokenType.StartArray);
@@ -210,7 +210,14 @@ internal sealed class KrakenBookHandler(ExchangeAdapter adapter, PairRules rules
             {
                 throw new FormatException("Book level without price or qty");
             }
-            side.Set(price, qty);
+            if (snapshot)
+            {
+                side.Set(price, qty);
+            }
+            else
+            {
+                SetLevel(side, price, qty);
+            }
         }
     }
 }

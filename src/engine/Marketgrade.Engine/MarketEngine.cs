@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Threading.Channels;
 using Marketgrade.Engine.Books;
+using Marketgrade.Engine.Flow;
 using Marketgrade.Engine.Recording;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -69,6 +70,7 @@ public sealed class MarketEngine : IAsyncDisposable
             return new Feed(adapter, connection, worker, book, _recording?.AddRecorder(adapter), recorder);
         })];
 
+        Flows = [.. _feeds.Select(feed => new ExchangeFlow(feed.Worker))];
         _metrics.ObserveEngine(ObserveQueueLengths, ObserveConnectionStates);
         _status = BuildStatus(elapsedSeconds: 0, running: false);
     }
@@ -81,6 +83,22 @@ public sealed class MarketEngine : IAsyncDisposable
     public EngineStatus Status => Volatile.Read(ref _status);
 
     public IReadOnlyList<ConnectionEvent> GetRecentEvents(int count) => _events.GetRecent(count);
+
+    /// <summary>Each exchange's live flow, in the order of <see cref="Adapters"/>.</summary>
+    public IReadOnlyList<ExchangeFlow> Flows { get; }
+
+    /// <summary>Whether the book workers write to their flow rings; off while nobody watches the flow.</summary>
+    public bool FlowEnabled
+    {
+        get => _feeds.Any(feed => feed.Worker.FlowEnabled);
+        set
+        {
+            foreach (var feed in _feeds)
+            {
+                feed.Worker.FlowEnabled = value;
+            }
+        }
+    }
 
     /// <summary>Recorders pick up the new settings between batches; nothing restarts.</summary>
     public void ApplyRecordingSettings(RecordingSettings settings)

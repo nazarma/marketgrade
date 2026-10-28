@@ -42,12 +42,14 @@ public sealed class OrderBookSide
     public long AmountAt(int index) => _amounts[Count - 1 - index];
 
     /// <summary>Sets the amount at a price; 0 deletes the level. Deleting a level that is not there does nothing.</summary>
-    public void Set(long price, long amount)
+    /// <returns>The amount the level had before, 0 if there was none.</returns>
+    public long Set(long price, long amount)
     {
         var key = _bids ? price : -price;
         var index = _keys.AsSpan(0, Count).BinarySearch(key);
         if (index >= 0)
         {
+            var previous = _amounts[index];
             if (amount != 0)
             {
                 _amounts[index] = amount;
@@ -58,11 +60,11 @@ public sealed class OrderBookSide
                 Array.Copy(_keys, index + 1, _keys, index, Count - index);
                 Array.Copy(_amounts, index + 1, _amounts, index, Count - index);
             }
-            return;
+            return previous;
         }
         if (amount == 0)
         {
-            return;
+            return 0;
         }
 
         index = ~index;
@@ -79,6 +81,7 @@ public sealed class OrderBookSide
         {
             MaxCount = Count;
         }
+        return 0;
     }
 
     /// <summary>Keeps only the best <paramref name="depth"/> levels.</summary>

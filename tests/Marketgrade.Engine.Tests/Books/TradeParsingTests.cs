@@ -9,7 +9,7 @@ namespace Marketgrade.Engine.Tests.Books;
 public partial class TradeParsingTests
 {
     private readonly MessageBufferPool _pool = new(4, 64 * 1024);
-    private readonly FlowRing _flow = new(64);
+    private readonly FlowRing _flow = new();
 
     private static string Fixture(string path) => File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", path));
 
@@ -30,10 +30,11 @@ public partial class TradeParsingTests
         return outcome;
     }
 
+    /// <summary>The trades in the ring; book changes go there too.</summary>
     private FlowEvent[] Flow()
     {
         var events = new FlowEvent[_flow.Capacity];
-        return events[.._flow.Read(0, events).Count];
+        return [.. events[.._flow.Read(0, events).Count].Where(e => e.Kind == FlowKind.Trade)];
     }
 
     [Fact]

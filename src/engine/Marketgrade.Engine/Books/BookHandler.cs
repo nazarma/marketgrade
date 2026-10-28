@@ -33,12 +33,17 @@ public enum FailureKind
 /// <summary>
 /// Parses one exchange's messages straight into its <see cref="OrderBook"/> and runs the exchange's own
 /// check after each one. Trades are parsed too, into <see cref="Flow"/>; they never touch the book or its
-/// check, and a trade that cannot be read is only counted. Used by the live book worker and by replay alike,
-/// single-threaded. Handling a message never allocates unless it fails.
+/// check, and a trade that cannot be read is only counted. Changes to a valid book near the mid price go to
+/// <see cref="Flow"/> as well. Used by the live book worker and by replay alike, single-threaded. Handling a
+/// message never allocates unless it fails.
 /// </summary>
 public abstract class BookHandler
 {
+    /// <summary>Book changes this close to the mid price, in parts per 10,000 of it, go to <see cref="Flow"/>; the live flow view shows about 15.</summary>
+    public const int FlowBandBasisPoints = 25;
+
     private long _connectionId = -1;
+    private long _arrivalUnixNs;
 
     protected BookHandler(ExchangeAdapter adapter, PairRules rules, int capacity, ILogger? logger)
     {
@@ -66,8 +71,11 @@ public abstract class BookHandler
 
     public FailureKind Failure { get; private set; }
 
-    /// <summary>Where trades are written; null writes none, as while nobody watches the flow.</summary>
+    /// <summary>Where trades and book changes are written; null writes none, as while nobody watches the flow.</summary>
     public FlowRing? Flow { get; set; }
+
+    /// <summary>Levels the last message changed in a valid book, at any distance from the mid price. Snapshots do not count.</summary>
+    public int BookChanges { get; private set; }
 
     /// <summary>Trades in the last message. Trades the exchange sends as history right after subscribing are not counted.</summary>
     public int Trades { get; private set; }
@@ -83,6 +91,8 @@ public abstract class BookHandler
         ExchangeUnixNs = 0;
         ExchangeHoldNs = NoHold;
         Trades = 0;
+        BookChanges = 0;
+        _arrivalUnixNs = message.ArrivalUnixNs;
         Kind = Adapter.Classify(message.Span);
         if (message.ConnectionId != _connectionId)
         {
@@ -149,6 +159,37 @@ public abstract class BookHandler
         }
         Book.State = BookState.Valid;
         return HandleOutcome.Synced;
+    }
+
+    /// <summary>
+    /// Sets a level of an update. In a valid book a real change is counted, and written to <see cref="Flow"/> with
+    /// the amount's signed change if its price is within <see cref="FlowBandBasisPoints"/> of the mid price.
+    /// Snapshots use <see cref="OrderBookSide.Set"/> directly: they rebuild the book rather than change it.
+    /// </summary>
+    protected void SetLevel(OrderBookSide side, long price, long amount)
+    {
+        var previous = side.Set(price, amount);
+        if (previous == amount || Book.State != BookState.Valid)
+        {
+            return;
+        }
+        BookChanges++;
+        if (Flow is not { } flow || Book.Bids.Count == 0 || Book.Asks.Count == 0)
+        {
+            return;
+        }
+        var mid = (Book.Bids.PriceAt(0) + Book.Asks.PriceAt(0)) / 2;
+        if (Math.Abs(price - mid) * 10_000 <= mid * FlowBandBasisPoints)
+        {
+            flow.Write(new FlowEvent(_arrivalUnixNs, FlowKind.BookChange, side.IsBids ? FlowSide.Buy : FlowSide.Sell, price, amount - previous));
+        }
+    }
+
+    /// <summary>For messages handled outside <see cref="Handle"/>, such as events a Binance resync held back.</summary>
+    protected void StartMessage(MessageBuffer message)
+    {
+        BookChanges = 0;
+        _arrivalUnixNs = message.ArrivalUnixNs;
     }
 
     /// <param name="timeUnixNs">The exchange's time of the trade.</param>

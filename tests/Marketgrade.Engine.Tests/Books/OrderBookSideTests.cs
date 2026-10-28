@@ -5,6 +5,17 @@ namespace Marketgrade.Engine.Tests.Books;
 public class OrderBookSideTests
 {
     [Fact]
+    public void Set_returns_the_amount_the_level_had_before()
+    {
+        var bids = new OrderBookSide(bids: true, capacity: 8);
+
+        Assert.Equal(0, bids.Set(100, 5));
+        Assert.Equal(5, bids.Set(100, 7));
+        Assert.Equal(7, bids.Set(100, 0));
+        Assert.Equal(0, bids.Set(100, 0));
+    }
+
+    [Fact]
     public void Asks_are_kept_lowest_first()
     {
         var asks = new OrderBookSide(bids: false, capacity: 8);

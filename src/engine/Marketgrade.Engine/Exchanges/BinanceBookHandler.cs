@@ -216,6 +216,7 @@ internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rule
 
     private HandleOutcome HandleEvent(MessageBuffer message)
     {
+        StartMessage(message);
         var reader = new Utf8JsonReader(message.Span);
         Expect(ref reader, JsonTokenType.StartObject);
         long first = -1, last = -1;
@@ -248,7 +249,7 @@ internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rule
                     }
                     decided = true;
                 }
-                ReadLevels(ref reader, side);
+                ReadLevels(ref reader, side, snapshot: false);
             }
             else
             {
@@ -325,11 +326,11 @@ internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rule
             }
             else if (reader.ValueTextEquals("bids"u8))
             {
-                ReadLevels(ref reader, Book.Bids);
+                ReadLevels(ref reader, Book.Bids, snapshot: true);
             }
             else if (reader.ValueTextEquals("asks"u8))
             {
-                ReadLevels(ref reader, Book.Asks);
+                ReadLevels(ref reader, Book.Asks, snapshot: true);
             }
             else
             {
@@ -340,7 +341,7 @@ internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rule
     }
 
     /// <summary>Levels are <c>["price", "quantity"]</c> pairs; quantity 0 removes the level.</summary>
-    private void ReadLevels(ref Utf8JsonReader reader, OrderBookSide side)
+    private void ReadLevels(ref Utf8JsonReader reader, OrderBookSide side, bool snapshot)
     {
         var rules = Book.Rules;
         Expect(ref reader, JsonTokenType.StartArray);
@@ -349,7 +350,14 @@ internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rule
             var price = ReadDecimal(ref reader, rules.PriceDecimals);
             var quantity = ReadDecimal(ref reader, rules.AmountDecimals);
             Expect(ref reader, JsonTokenType.EndArray);
-            side.Set(price, quantity);
+            if (snapshot)
+            {
+                side.Set(price, quantity);
+            }
+            else
+            {
+                SetLevel(side, price, quantity);
+            }
         }
     }
 }

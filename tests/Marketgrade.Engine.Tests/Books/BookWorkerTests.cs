@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using Marketgrade.Engine.Books;
 using Marketgrade.Engine.Exchanges;
+using Marketgrade.Engine.Flow;
 using Marketgrade.Engine.Recording;
 using Marketgrade.Engine.Tests.Recording;
 
@@ -100,6 +101,51 @@ public class BookWorkerTests
         Assert.Equal(0, status.DataMessages);
         Assert.Equal(0, status.ErrorMessages);
         Assert.Equal(BookState.Syncing, status.BookState);
+    }
+
+    [Fact]
+    public async Task Flow_is_written_only_while_enabled_and_counted_always()
+    {
+        var lines = TestMessages.Sequence("kraken-book.jsonl");
+        var trade = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "kraken", "trade-update.json"));
+        var secondHalf = new TaskCompletionSource();
+        await using var server = await FakeExchangeServer.StartAsync(async c =>
+        {
+            await c.SendAsync(lines[0]);
+            for (var i = 2; i < 50; i++)
+            {
+                await c.SendAsync(lines[i]);
+            }
+            await c.SendAsync(trade);
+            await secondHalf.Task;
+            for (var i = 50; i < 100; i++)
+            {
+                await c.SendAsync(lines[i]);
+            }
+            await c.SendAsync(trade);
+            await c.Closed;
+        });
+        await using var engine = new MarketEngine(s_fast, [new KrakenAdapter(server.Uri)]);
+        var flow = engine.Flows[0];
+        engine.Start([s_kraken]);
+
+        await WaitUntilAsync(() => flow.Trades == 1);
+        var changesBefore = flow.BookChanges;
+        Assert.True(changesBefore > 0);
+        Assert.Equal(0, flow.Ring.Published);
+
+        engine.FlowEnabled = true;
+        // The worker picks the switch up after its next batch or housekeeping pass.
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        secondHalf.SetResult();
+        await WaitUntilAsync(() => flow.Trades == 2);
+
+        var events = new FlowEvent[flow.Ring.Capacity];
+        var read = flow.Ring.Read(0, events);
+        Assert.Equal(1, events[..read.Count].Count(e => e.Kind == FlowKind.Trade));
+        Assert.InRange(events[..read.Count].Count(e => e.Kind == FlowKind.BookChange), 1, flow.BookChanges - changesBefore);
+        Assert.Equal("Kraken", flow.Exchange);
+        Assert.Equal(s_kraken, flow.Rules);
     }
 
     [Fact]

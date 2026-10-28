@@ -75,6 +75,7 @@ internal sealed class BookWorker
     private long _heartbeatMessages;
     private long _tradeMessages;
     private long _trades;
+    private long _bookChanges;
     private long _tradeFailures;
     private bool _flowEnabled;
     private long _controlMessages;
@@ -164,7 +165,10 @@ internal sealed class BookWorker
     /// <summary>Trade messages that could not be read; they never affect the book.</summary>
     public long TradeFailures => Interlocked.Read(ref _tradeFailures);
 
-    /// <summary>The trades of this exchange, while <see cref="FlowEnabled"/>.</summary>
+    /// <summary>Levels changed by updates to a valid book, at any distance from the mid price.</summary>
+    public long BookChanges => Interlocked.Read(ref _bookChanges);
+
+    /// <summary>The trades and the book changes near the mid price of this exchange, while <see cref="FlowEnabled"/>.</summary>
     public FlowRing Flow => _flow;
 
     /// <summary>Writes to <see cref="Flow"/> start or stop with the next batch of messages; counting goes on either way.</summary>
@@ -335,6 +339,10 @@ internal sealed class BookWorker
             _lastSeq = buffer.Seq;
             outcome = _handler.Handle(buffer);
             kind = _handler.Kind;
+            if (_handler.BookChanges > 0)
+            {
+                Interlocked.Add(ref _bookChanges, _handler.BookChanges);
+            }
             if (outcome is HandleOutcome.Applied or HandleOutcome.Synced or HandleOutcome.Failed)
             {
                 _version++;

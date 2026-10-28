@@ -141,7 +141,7 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
                     }
                     else
                     {
-                        ReadUpdates(ref reader, holdTime: isSnapshot == false);
+                        ReadUpdates(ref reader, update: isSnapshot == false);
                     }
                 }
                 else
@@ -230,8 +230,9 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
         AddTrade(time, side, price, size);
     }
 
-    /// <param name="holdTime">Keeps the oldest <c>event_time</c>; one that cannot be read is left out, it does not touch the book.</param>
-    private void ReadUpdates(ref Utf8JsonReader reader, bool holdTime)
+    /// <param name="update">Not a snapshot: changes the book level by level and keeps the oldest <c>event_time</c>
+    /// for the hold time; one that cannot be read is left out, it does not touch the book.</param>
+    private void ReadUpdates(ref Utf8JsonReader reader, bool update)
     {
         var rules = Book.Rules;
         Expect(ref reader, JsonTokenType.StartArray);
@@ -256,7 +257,7 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
                 {
                     quantity = ReadDecimal(ref reader, rules.AmountDecimals);
                 }
-                else if (holdTime && reader.ValueTextEquals("event_time"u8))
+                else if (update && reader.ValueTextEquals("event_time"u8))
                 {
                     reader.Read();
                     if (reader.TokenType == JsonTokenType.String && !reader.ValueIsEscaped
@@ -274,7 +275,14 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
             {
                 throw new FormatException("Update without side, price_level or new_quantity");
             }
-            side.Set(price, quantity);
+            if (update)
+            {
+                SetLevel(side, price, quantity);
+            }
+            else
+            {
+                side.Set(price, quantity);
+            }
         }
     }
 }

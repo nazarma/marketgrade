@@ -3,6 +3,7 @@ using BenchmarkDotNet.Attributes;
 using Marketgrade.Engine;
 using Marketgrade.Engine.Books;
 using Marketgrade.Engine.Exchanges;
+using Marketgrade.Engine.Flow;
 using Marketgrade.Engine.Recording;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -13,8 +14,9 @@ namespace Marketgrade.Benchmarks;
 /// applied to that book. <see cref="Apply"/> is the handler alone: parse, apply and check.
 /// <see cref="WorkerPath"/> is everything the book worker does per message: classify, handle (for
 /// Coinbase including the hold time from every update's <c>event_time</c>), delay, catch-up, hold time,
-/// queue wait and processing statistics, counters and the release of the buffer. Each iteration rebuilds the book from
-/// the snapshot first, outside the measurement.
+/// queue wait and processing statistics, counters and the release of the buffer. With <see cref="Flow"/> both also
+/// write the changes near the mid price to the flow ring, as while the live flow view is open. Each iteration
+/// rebuilds the book from the snapshot first, outside the measurement.
 /// </summary>
 [MemoryDiagnoser]
 public class BookBenchmarks
@@ -31,6 +33,9 @@ public class BookBenchmarks
     [Params("kraken", "coinbase", "binance")]
     public string Exchange { get; set; } = "";
 
+    [Params(false, true)]
+    public bool Flow { get; set; }
+
     [GlobalSetup]
     public void Setup()
     {
@@ -46,6 +51,7 @@ public class BookBenchmarks
     public void SetupApply()
     {
         _handler = Fixtures.AdapterFor($"{Exchange}/").CreateBookHandler(Fixtures.RulesFor(Exchange), new EngineOptions())!;
+        _handler.Flow = Flow ? new FlowRing() : null;
         Sync(_handler, buffer => _handler.Handle(buffer) != HandleOutcome.Held);
     }
 
@@ -68,6 +74,7 @@ public class BookBenchmarks
         var connection = new ExchangeConnection(adapter, _pool, [queue.Writer], options, events);
         _worker = new BookWorker(adapter, connection, queue.Reader, new ManualResetEventSlim(), _pool, _http, new ClockOffset(),
             options, events, NullLogger.Instance);
+        _worker.FlowEnabled = Flow;
         _worker.Prepare(Fixtures.RulesFor(Exchange));
         Sync(_worker.Handler!, buffer =>
         {
