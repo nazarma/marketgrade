@@ -260,6 +260,10 @@
   .tbl .r {
     text-align: right;
   }
+  /* Numbers and units stay on one line. */
+  .tbl td.mono {
+    white-space: nowrap;
+  }
   .field-input {
     font: inherit;
     font-size: 14px;

@@ -9,7 +9,7 @@ export function DelayVolume({
   rangeLabel: string;
 }) {
   return (
-    <section className="panel flex min-w-0 flex-[1_1_460px] flex-col gap-2 px-2 pt-[18px] pb-2">
+    <section className="panel flex min-w-0 flex-[1_1_640px] flex-col gap-2 px-2 pt-[18px] pb-2">
       <h2 className="h2 px-3">Delay and volume</h2>
       <div className="overflow-x-auto">
         <table className="tbl">

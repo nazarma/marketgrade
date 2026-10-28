@@ -4,7 +4,7 @@ import { formatPriceText } from "@/lib/format";
 export function BestPrices({ exchanges }: { exchanges: ExchangeStatus[] }) {
   const usdt = exchanges.filter((e) => e.pair.endsWith("USDT")).map((e) => e.name);
   return (
-    <section className="panel flex min-w-0 flex-[1_1_320px] flex-col gap-2 px-2 pt-[18px] pb-2">
+    <section className="panel flex min-w-0 flex-[1_1_350px] flex-col gap-2 px-2 pt-[18px] pb-2">
       <h2 className="h2 px-3">Best prices now</h2>
       <div className="overflow-x-auto">
         <table className="tbl">
