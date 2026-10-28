@@ -47,8 +47,12 @@ builder.Services.AddSingleton(services => new MarketEngine(
     services.GetRequiredService<RecordingSettingsStore>().Load()));
 builder.Services.AddHostedService<EngineHostedService>();
 builder.Services.AddHostedService<ClockOffsetService>();
+builder.Services.AddSingleton<BackendMetrics>();
+builder.Services.AddHostedService<LivePushService>();
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter()));
+builder.Services.AddSignalR().AddJsonProtocol(options =>
+    options.PayloadSerializerOptions.Converters.Add(new JsonStringEnumConverter()));
 
 var app = builder.Build();
 
@@ -66,7 +70,16 @@ app.UseCors();
 
 app.Use(async (context, next) =>
 {
-    var authorization = Encoding.UTF8.GetBytes(context.Request.Headers.Authorization.ToString());
+    var header = context.Request.Headers.Authorization.ToString();
+    // Browsers cannot set headers on a WebSocket, so the live hub also takes the token from the query string.
+    // Nothing logs request URLs (Microsoft.AspNetCore logs warnings only), so the token stays out of the logs.
+    if (header.Length == 0
+        && context.Request.Path.StartsWithSegments(LiveHub.Path)
+        && context.Request.Query.TryGetValue("access_token", out var queryToken))
+    {
+        header = $"Bearer {queryToken}";
+    }
+    var authorization = Encoding.UTF8.GetBytes(header);
     if (!CryptographicOperations.FixedTimeEquals(authorization, expectedAuthorization))
     {
         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -98,6 +111,8 @@ app.MapGet("/books/{exchange}", (string exchange, int? levels, MarketEngine engi
         : Results.Problem(statusCode: StatusCodes.Status503ServiceUnavailable, title: "No book yet",
             detail: "The book is published once it is read; try again in a moment.");
 });
+
+app.MapHub<LiveHub>(LiveHub.Path);
 
 app.MapGet("/settings/recording", (RecordingSettingsStore settings) => new
 {
