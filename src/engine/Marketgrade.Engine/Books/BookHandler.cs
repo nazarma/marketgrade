@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Marketgrade.Engine.Flow;
 using Microsoft.Extensions.Logging;
 
 namespace Marketgrade.Engine.Books;
@@ -31,8 +32,9 @@ public enum FailureKind
 
 /// <summary>
 /// Parses one exchange's messages straight into its <see cref="OrderBook"/> and runs the exchange's own
-/// check after each one. Used by the live book worker and by replay alike, single-threaded. Handling
-/// a message never allocates unless it fails.
+/// check after each one. Trades are parsed too, into <see cref="Flow"/>; they never touch the book or its
+/// check, and a trade that cannot be read is only counted. Used by the live book worker and by replay alike,
+/// single-threaded. Handling a message never allocates unless it fails.
 /// </summary>
 public abstract class BookHandler
 {
@@ -64,6 +66,15 @@ public abstract class BookHandler
 
     public FailureKind Failure { get; private set; }
 
+    /// <summary>Where trades are written; null writes none, as while nobody watches the flow.</summary>
+    public FlowRing? Flow { get; set; }
+
+    /// <summary>Trades in the last message. Trades the exchange sends as history right after subscribing are not counted.</summary>
+    public int Trades { get; private set; }
+
+    /// <summary>Trade messages that could not be read. They are skipped; the book is not affected.</summary>
+    public long TradeFailures { get; private set; }
+
     /// <summary>Why the last message failed, including the numbers involved.</summary>
     public string? Cause { get; private set; }
 
@@ -71,6 +82,7 @@ public abstract class BookHandler
     {
         ExchangeUnixNs = 0;
         ExchangeHoldNs = NoHold;
+        Trades = 0;
         Kind = Adapter.Classify(message.Span);
         if (message.ConnectionId != _connectionId)
         {
@@ -81,7 +93,7 @@ public abstract class BookHandler
         {
             return HandleCore(message);
         }
-        catch (Exception e) when (e is JsonException or InvalidOperationException or FormatException)
+        catch (Exception e) when (IsReadError(e))
         {
             return Fail(FailureKind.Parse, $"Message could not be read: {e.Message}");
         }
@@ -138,6 +150,23 @@ public abstract class BookHandler
         Book.State = BookState.Valid;
         return HandleOutcome.Synced;
     }
+
+    /// <param name="timeUnixNs">The exchange's time of the trade.</param>
+    /// <param name="taker">The side of the order that took liquidity.</param>
+    protected void AddTrade(long timeUnixNs, FlowSide taker, long price, long amount)
+    {
+        Trades++;
+        Flow?.Write(new FlowEvent(timeUnixNs, FlowKind.Trade, taker, price, amount));
+    }
+
+    /// <summary>A trade message could not be read; whatever trades it gave until then are kept.</summary>
+    protected HandleOutcome TradeFailed()
+    {
+        TradeFailures++;
+        return HandleOutcome.Ignored;
+    }
+
+    protected static bool IsReadError(Exception e) => e is JsonException or InvalidOperationException or FormatException;
 
     /// <summary>Reads a price or amount given as a JSON number or string.</summary>
     protected static long ReadDecimal(ref Utf8JsonReader reader, int decimals)

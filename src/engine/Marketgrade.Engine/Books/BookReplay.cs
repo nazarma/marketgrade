@@ -44,6 +44,11 @@ public sealed class BookReplay
 
     public long Messages { get; private set; }
 
+    /// <summary>Trades read; they do not touch the book.</summary>
+    public long Trades { get; private set; }
+
+    public long TradeFailures => _handler.TradeFailures;
+
     /// <summary>Messages applied to a valid book, including the snapshots.</summary>
     public long Applied { get; private set; }
 
@@ -128,6 +133,7 @@ public sealed class BookReplay
         }
         var buffer = Load(record, payload);
         var outcome = _handler.Handle(buffer);
+        Trades += _handler.Trades;
         switch (outcome)
         {
             case HandleOutcome.Applied:

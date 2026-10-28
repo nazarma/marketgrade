@@ -38,6 +38,8 @@ public sealed record RecordingStatus(
 /// <param name="ExchangeHoldP50Ms">Median time the exchange held changes before sending them (message timestamp minus its oldest change time), over the last minute; only Coinbase reports change times, null otherwise.</param>
 /// <param name="QueueWaitP50Ns">Median time from receiving a message to the book worker starting on it, over the last minute; null without data.</param>
 /// <param name="GapsToday">Times the book became invalid today (UTC).</param>
+/// <param name="Trades">Trades parsed (a trade message can hold several), without those sent as history after subscribing.</param>
+/// <param name="TradeFailures">Trade messages that could not be read; they never affect the book.</param>
 public sealed record ExchangeStatus(
     int Id,
     string Name,
@@ -74,4 +76,7 @@ public sealed record ExchangeStatus(
     double? CatchUpMaxDelayMs = null,
     double? ExchangeHoldP50Ms = null,
     double? ExchangeHoldP99Ms = null,
-    long TradeMessages = 0);
+    long TradeMessages = 0,
+    long Trades = 0,
+    double TradesPerSecond = 0,
+    long TradeFailures = 0);

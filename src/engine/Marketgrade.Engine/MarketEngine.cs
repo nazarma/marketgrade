@@ -204,6 +204,7 @@ public sealed class MarketEngine : IAsyncDisposable
             var connection = feed.Connection;
             var worker = feed.Worker;
             var data = worker.DataMessages;
+            var trades = worker.Trades;
             var bytes = worker.Bytes;
             var lastMessage = connection.LastMessageTimestamp;
             var priceDecimals = worker.Rules?.PriceDecimals ?? 0;
@@ -247,8 +248,12 @@ public sealed class MarketEngine : IAsyncDisposable
                 worker.CatchUpMessages > 0 ? worker.CatchUpMaxDelayNs / 1e6 : null,
                 worker.HoldCount > 0 ? worker.HoldP50Ns / 1e6 : null,
                 worker.HoldCount > 0 ? worker.HoldP99Ns / 1e6 : null,
-                worker.TradeMessages);
+                worker.TradeMessages,
+                trades,
+                elapsedSeconds > 0 ? (trades - feed.LastTrades) / elapsedSeconds : 0,
+                worker.TradeFailures);
             feed.LastDataMessages = data;
+            feed.LastTrades = trades;
             feed.LastBytes = bytes;
         }
         var recording = _recording?.BuildStatus(running, _feeds.Sum(feed => feed.Connection.RecordingDropped + feed.Worker.RecordingDropped));
@@ -336,6 +341,8 @@ public sealed class MarketEngine : IAsyncDisposable
         public IEnumerable<Queue> Queues => RecorderQueue is null ? [BookQueue] : [BookQueue, RecorderQueue];
 
         public long LastDataMessages { get; set; }
+
+        public long LastTrades { get; set; }
 
         public long LastBytes { get; set; }
     }

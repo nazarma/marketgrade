@@ -3,6 +3,7 @@ using System.Text;
 using System.Threading.Channels;
 using Marketgrade.Engine.Books;
 using Marketgrade.Engine.Exchanges;
+using Marketgrade.Engine.Flow;
 using Marketgrade.Engine.Recording;
 using Microsoft.Extensions.Logging;
 
@@ -55,6 +56,7 @@ internal sealed class BookWorker
     private readonly WindowedHistogram _queueWait;
     private readonly WindowedHistogram _hold;
     private readonly CancellationTokenSource _stop = new();
+    private readonly FlowRing _flow = new();
 
     private BookHandler? _handler;
     private Thread? _thread;
@@ -72,6 +74,9 @@ internal sealed class BookWorker
     private long _dataMessages;
     private long _heartbeatMessages;
     private long _tradeMessages;
+    private long _trades;
+    private long _tradeFailures;
+    private bool _flowEnabled;
     private long _controlMessages;
     private long _errorMessages;
     private long _bytes;
@@ -152,6 +157,22 @@ internal sealed class BookWorker
     public long HeartbeatMessages => Interlocked.Read(ref _heartbeatMessages);
 
     public long TradeMessages => Interlocked.Read(ref _tradeMessages);
+
+    /// <summary>Trades parsed; a message can hold several.</summary>
+    public long Trades => Interlocked.Read(ref _trades);
+
+    /// <summary>Trade messages that could not be read; they never affect the book.</summary>
+    public long TradeFailures => Interlocked.Read(ref _tradeFailures);
+
+    /// <summary>The trades of this exchange, while <see cref="FlowEnabled"/>.</summary>
+    public FlowRing Flow => _flow;
+
+    /// <summary>Writes to <see cref="Flow"/> start or stop with the next batch of messages; counting goes on either way.</summary>
+    public bool FlowEnabled
+    {
+        get => Volatile.Read(ref _flowEnabled);
+        set => Volatile.Write(ref _flowEnabled, value);
+    }
 
     public long ControlMessages => Interlocked.Read(ref _controlMessages);
 
@@ -242,6 +263,15 @@ internal sealed class BookWorker
             _handler = _adapter.CreateBookHandler(rules, _options, _logger);
         }
         Volatile.Write(ref _state, (int)(_handler is null ? BookState.NoPairRules : BookState.Syncing));
+        UpdateFlow();
+    }
+
+    private void UpdateFlow()
+    {
+        if (_handler is not null)
+        {
+            _handler.Flow = FlowEnabled ? _flow : null;
+        }
     }
 
     private void Run()
@@ -342,6 +372,11 @@ internal sealed class BookWorker
                 break;
             case MessageKind.Trade:
                 Interlocked.Increment(ref _tradeMessages);
+                if (_handler is not null)
+                {
+                    Interlocked.Add(ref _trades, _handler.Trades);
+                    Interlocked.Exchange(ref _tradeFailures, _handler.TradeFailures);
+                }
                 break;
             case MessageKind.Heartbeat:
                 Interlocked.Increment(ref _heartbeatMessages);
@@ -404,6 +439,7 @@ internal sealed class BookWorker
         {
             return;
         }
+        UpdateFlow();
 
         // A book can only be as current as its connection. Stopping the engine is no gap.
         var connection = _connection.State;

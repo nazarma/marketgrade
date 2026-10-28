@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Marketgrade.Engine.Books;
+using Marketgrade.Engine.Flow;
 using Microsoft.Extensions.Logging;
 
 namespace Marketgrade.Engine.Exchanges;
@@ -11,6 +12,8 @@ namespace Marketgrade.Engine.Exchanges;
 /// A snapshot event replaces the book; <c>new_quantity</c> is the new size, 0 removes the level.
 /// Each update carries the <c>event_time</c> of the change; the envelope <c>timestamp</c> minus the oldest
 /// one is how long Coinbase held the message (not for snapshots, whose times are the levels' history).
+/// <c>market_trades</c> messages are part of the same sequence. Their <c>side</c> is the maker's (Coinbase
+/// documents it so, and live trades match it), so the taker's side is the other one.
 /// </summary>
 internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rules, int capacity, ILogger? logger)
     : BookHandler(adapter, rules, capacity, logger)
@@ -26,12 +29,15 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
 
     protected override HandleOutcome HandleCore(MessageBuffer message)
     {
-        if (Kind == MessageKind.Error || Book.State == BookState.Invalid)
+        // After a failure the sequence is not followed until the next connection; trades still are.
+        var checking = Book.State != BookState.Invalid;
+        if (Kind == MessageKind.Error || (!checking && Kind != MessageKind.Trade))
         {
             return HandleOutcome.Ignored;
         }
 
         var data = Kind == MessageKind.Data;
+        var trades = Kind == MessageKind.Trade;
         var hasSequence = false;
         var snapshot = false;
         _oldestEventTime = long.MaxValue;
@@ -44,6 +50,10 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
                 reader.Read();
                 var sequence = reader.GetInt64();
                 hasSequence = true;
+                if (!checking)
+                {
+                    continue;
+                }
                 if (_lastSequence >= 0 && sequence != _lastSequence + 1)
                 {
                     var expected = _lastSequence + 1;
@@ -59,6 +69,20 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
             else if (data && reader.ValueTextEquals("events"u8))
             {
                 snapshot |= ReadEvents(ref reader);
+            }
+            else if (trades && reader.ValueTextEquals("events"u8))
+            {
+                try
+                {
+                    ReadTradeEvents(ref reader);
+                }
+                catch (Exception e) when (IsReadError(e))
+                {
+                    // Before its sequence_num the message's place in the connection is unknown.
+                    return hasSequence || !checking
+                        ? TradeFailed()
+                        : Fail(FailureKind.Parse, $"Trade message could not be read before its sequence_num: {e.Message}");
+                }
             }
             else
             {
@@ -127,6 +151,83 @@ internal sealed class CoinbaseBookHandler(ExchangeAdapter adapter, PairRules rul
             }
         }
         return snapshot;
+    }
+
+    /// <summary>Trades of <c>update</c> events; a <c>snapshot</c> event holds trades from before we subscribed.</summary>
+    private void ReadTradeEvents(ref Utf8JsonReader reader)
+    {
+        Expect(ref reader, JsonTokenType.StartArray);
+        while (reader.Read() && reader.TokenType == JsonTokenType.StartObject)
+        {
+            bool? update = null;
+            while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+            {
+                if (reader.ValueTextEquals("type"u8))
+                {
+                    reader.Read();
+                    update = reader.ValueTextEquals("update"u8);
+                }
+                else if (reader.ValueTextEquals("trades"u8))
+                {
+                    if (update is null)
+                    {
+                        throw new FormatException("Event has trades before its type");
+                    }
+                    if (update == false)
+                    {
+                        Skip(ref reader);
+                        continue;
+                    }
+                    Expect(ref reader, JsonTokenType.StartArray);
+                    while (reader.Read() && reader.TokenType == JsonTokenType.StartObject)
+                    {
+                        ReadTrade(ref reader);
+                    }
+                }
+                else
+                {
+                    Skip(ref reader);
+                }
+            }
+        }
+    }
+
+    private void ReadTrade(ref Utf8JsonReader reader)
+    {
+        var rules = Book.Rules;
+        FlowSide? taker = null;
+        long price = -1, size = -1, time = 0;
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            if (reader.ValueTextEquals("side"u8))
+            {
+                reader.Read();
+                taker = reader.ValueTextEquals("BUY"u8) ? FlowSide.Sell
+                    : reader.ValueTextEquals("SELL"u8) ? FlowSide.Buy
+                    : throw new FormatException($"Unknown side at byte {reader.TokenStartIndex}");
+            }
+            else if (reader.ValueTextEquals("price"u8))
+            {
+                price = ReadDecimal(ref reader, rules.PriceDecimals);
+            }
+            else if (reader.ValueTextEquals("size"u8))
+            {
+                size = ReadDecimal(ref reader, rules.AmountDecimals);
+            }
+            else if (reader.ValueTextEquals("time"u8))
+            {
+                time = ReadTimestamp(ref reader);
+            }
+            else
+            {
+                Skip(ref reader);
+            }
+        }
+        if (taker is not { } side || price < 0 || size < 0 || time == 0)
+        {
+            throw new FormatException("Trade without side, price, size or time");
+        }
+        AddTrade(time, side, price, size);
     }
 
     /// <param name="holdTime">Keeps the oldest <c>event_time</c>; one that cannot be read is left out, it does not touch the book.</param>

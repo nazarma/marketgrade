@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Marketgrade.Engine.Books;
+using Marketgrade.Engine.Flow;
 using Microsoft.Extensions.Logging;
 
 namespace Marketgrade.Engine.Exchanges;
@@ -15,6 +16,7 @@ namespace Marketgrade.Engine.Exchanges;
 /// </list>
 /// Fetching is up to the caller (<see cref="ShouldFetch"/>, <see cref="StartFetch"/>, <see cref="OnSnapshot"/>),
 /// at most once per <paramref name="fetchInterval"/>. Binance writes <c>U</c> and <c>u</c> before <c>b</c> and <c>a</c>.
+/// Trade events say whether the buyer was the maker (<c>m</c>); if so, the taker sold.
 /// </summary>
 internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rules, int capacity, TimeSpan fetchInterval, ILogger? logger)
     : BookHandler(adapter, rules, capacity, logger)
@@ -158,8 +160,59 @@ internal sealed class BinanceBookHandler(ExchangeAdapter adapter, PairRules rule
         _phase = Phase.NeedsSnapshot;
     }
 
-    protected override HandleOutcome HandleCore(MessageBuffer message) =>
-        Kind == MessageKind.Data ? HandleEvent(message) : HandleOutcome.Ignored;
+    protected override HandleOutcome HandleCore(MessageBuffer message) => Kind switch
+    {
+        MessageKind.Data => HandleEvent(message),
+        MessageKind.Trade => HandleTrade(message),
+        _ => HandleOutcome.Ignored,
+    };
+
+    private HandleOutcome HandleTrade(MessageBuffer message)
+    {
+        try
+        {
+            var rules = Book.Rules;
+            var reader = new Utf8JsonReader(message.Span);
+            Expect(ref reader, JsonTokenType.StartObject);
+            bool? buyerIsMaker = null;
+            long price = -1, quantity = -1, timeMs = 0;
+            while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+            {
+                if (reader.ValueTextEquals("p"u8))
+                {
+                    price = ReadDecimal(ref reader, rules.PriceDecimals);
+                }
+                else if (reader.ValueTextEquals("q"u8))
+                {
+                    quantity = ReadDecimal(ref reader, rules.AmountDecimals);
+                }
+                else if (reader.ValueTextEquals("T"u8))
+                {
+                    reader.Read();
+                    timeMs = reader.GetInt64();
+                }
+                else if (reader.ValueTextEquals("m"u8))
+                {
+                    reader.Read();
+                    buyerIsMaker = reader.GetBoolean();
+                }
+                else
+                {
+                    Skip(ref reader);
+                }
+            }
+            if (buyerIsMaker is not { } maker || price < 0 || quantity < 0 || timeMs <= 0)
+            {
+                return TradeFailed();
+            }
+            AddTrade(timeMs * 1_000_000, maker ? FlowSide.Sell : FlowSide.Buy, price, quantity);
+            return HandleOutcome.Ignored;
+        }
+        catch (Exception e) when (IsReadError(e))
+        {
+            return TradeFailed();
+        }
+    }
 
     private HandleOutcome HandleEvent(MessageBuffer message)
     {

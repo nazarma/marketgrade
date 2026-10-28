@@ -204,6 +204,7 @@ static async Task<int> ReplayAsync(string target)
         Console.WriteLine($"  messages   {replay.Messages} replayed, {replay.Applied} applied, {replay.Syncs} snapshots applied and checked");
         Console.WriteLine($"  failures   {failures.Count(f => f.Kind == FailureKind.Checksum)} checksum, {failures.Count(f => f.Kind == FailureKind.Sequence)} sequence, "
             + $"{failures.Count(f => f.Kind == FailureKind.Parse)} parse; {replay.UnexplainedFailures} without a live book reset");
+        Console.WriteLine($"  trades     {replay.Trades} read, {replay.TradeFailures} trade messages unreadable");
         Console.WriteLine($"  live       {replay.LiveResets.Count} book resets, {replay.RecordingGaps} recording gaps");
         Console.WriteLine($"  levels     at most {replay.Book.Bids.MaxCount} bids and {replay.Book.Asks.MaxCount} asks");
         foreach (var failure in failures)

@@ -32,7 +32,8 @@ internal static class StatusTable
             var reachable = e.ConnectionId > 0 ? "reachable" : e.State == ConnectionState.Blocked ? "BLOCKED in this region" : "NOT reachable";
             Console.WriteLine($"  {e.Name} {e.Pair}: {reachable}, state {e.State}");
             Console.WriteLine(
-                $"    {e.DataMessages} data messages ({(double)e.DataMessages / seconds:0.0}/s), {e.TradeMessages} trade messages, " +
+                $"    {e.DataMessages} data messages ({(double)e.DataMessages / seconds:0.0}/s), {e.TradeMessages} trade messages " +
+                $"({e.Trades} trades, {e.TradeFailures} unreadable), " +
                 $"{e.HeartbeatMessages} heartbeats, " +
                 $"{e.ControlMessages} control, {e.ErrorMessages} errors, {e.Bytes / 1024.0 / 1024.0:0.00} MB");
             Console.WriteLine($"    {e.ConnectionId} connection(s), {e.ReconnectCount} reconnect(s){(e.LastError is null ? "" : $", last error: {e.LastError}")}");

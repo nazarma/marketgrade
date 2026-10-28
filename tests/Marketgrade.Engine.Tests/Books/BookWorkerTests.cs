@@ -78,6 +78,31 @@ public class BookWorkerTests
     }
 
     [Fact]
+    public async Task Trades_are_counted_without_a_book()
+    {
+        var trade = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "kraken", "trade-update.json"));
+        await using var server = await FakeExchangeServer.StartAsync(async c =>
+        {
+            for (var i = 0; i < 3; i++)
+            {
+                await c.SendAsync(trade);
+            }
+            await c.SendAsync(trade.Replace("\"sell\"", "\"up\"", StringComparison.Ordinal));
+            await c.Closed;
+        });
+        await using var engine = new MarketEngine(s_fast, [new KrakenAdapter(server.Uri)]);
+        engine.Start([s_kraken]);
+
+        await WaitUntilAsync(() => engine.Status.Exchanges[0] is { TradeMessages: 4, TradeFailures: 1 });
+
+        var status = engine.Status.Exchanges[0];
+        Assert.Equal(3, status.Trades);
+        Assert.Equal(0, status.DataMessages);
+        Assert.Equal(0, status.ErrorMessages);
+        Assert.Equal(BookState.Syncing, status.BookState);
+    }
+
+    [Fact]
     public async Task Coinbase_sequence_gap_reconnects()
     {
         var snapshot = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "coinbase", "data-l2-snapshot-trimmed.json"));
