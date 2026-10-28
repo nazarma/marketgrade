@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json.Serialization;
 using Marketgrade.Backend;
+using Marketgrade.Backend.History;
 using Marketgrade.Engine;
 using Marketgrade.Engine.Books;
 using Marketgrade.Engine.Exchanges;
@@ -45,6 +46,11 @@ builder.Services.AddSingleton(services => new MarketEngine(
     ExchangeAdapters.CreateDefault(),
     services.GetRequiredService<ILoggerFactory>().CreateLogger("Marketgrade.Engine"),
     services.GetRequiredService<RecordingSettingsStore>().Load()));
+// Hosted services stop in reverse order: the history writer stops after the engine, so it saves the engine's last minute.
+builder.Services.AddSingleton(services => new HistoryStore(Path.Combine(services.GetRequiredService<SettingsStore>().Folder, "history.duckdb")));
+builder.Services.AddSingleton(services => services.GetRequiredService<MarketEngine>().History);
+builder.Services.AddSingleton<HistoryWriter>();
+builder.Services.AddHostedService(services => services.GetRequiredService<HistoryWriter>());
 builder.Services.AddHostedService<EngineHostedService>();
 builder.Services.AddHostedService<ClockOffsetService>();
 builder.Services.AddSingleton<BackendMetrics>();

@@ -7,5 +7,6 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Marketgrade.Engine.Tests" />
     <InternalsVisibleTo Include="Marketgrade.Benchmarks" />
+    <InternalsVisibleTo Include="Marketgrade.Backend.Tests" />
   </ItemGroup>
 </Project>
