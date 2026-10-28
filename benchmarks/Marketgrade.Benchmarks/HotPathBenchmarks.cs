@@ -136,7 +136,7 @@ public class HotPathBenchmarks
     }
 
     private long Total() =>
-        _worker.DataMessages + _worker.HeartbeatMessages + _worker.ControlMessages + _worker.ErrorMessages;
+        _worker.DataMessages + _worker.TradeMessages + _worker.HeartbeatMessages + _worker.ControlMessages + _worker.ErrorMessages;
 
     /// <summary>Server-to-client text frames (unmasked), cycling through the messages, then a close frame.</summary>
     private static byte[] BuildFrames(byte[][] messages)

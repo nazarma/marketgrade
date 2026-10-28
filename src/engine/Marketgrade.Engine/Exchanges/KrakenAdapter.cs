@@ -4,7 +4,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Marketgrade.Engine.Exchanges;
 
-/// <summary>Kraken spot WebSocket v2. Heartbeats arrive automatically once any channel is subscribed.</summary>
+/// <summary>Kraken spot WebSocket v2: book and trades on one connection. Heartbeats arrive automatically once any channel is subscribed.</summary>
 public sealed class KrakenAdapter(Uri? uri = null, Uri? restUri = null) : ExchangeAdapter
 {
     public static readonly Uri DefaultUri = new("wss://ws.kraken.com/v2");
@@ -26,6 +26,8 @@ public sealed class KrakenAdapter(Uri? uri = null, Uri? restUri = null) : Exchan
     public override IReadOnlyList<byte[]> SubscribeMessages { get; } =
     [
         """{"method":"subscribe","params":{"channel":"book","symbol":["BTC/USD"],"depth":1000}}"""u8.ToArray(),
+        // Without the snapshot of the last 50 trades, which happened before we connected.
+        """{"method":"subscribe","params":{"channel":"trade","symbol":["BTC/USD"],"snapshot":false}}"""u8.ToArray(),
     ];
 
     // Kraken's REST API still names bitcoin XBT.
@@ -65,6 +67,10 @@ public sealed class KrakenAdapter(Uri? uri = null, Uri? restUri = null) : Exchan
                     if (reader.ValueTextEquals("book"u8))
                     {
                         return MessageKind.Data;
+                    }
+                    if (reader.ValueTextEquals("trade"u8))
+                    {
+                        return MessageKind.Trade;
                     }
                     return reader.ValueTextEquals("heartbeat"u8) ? MessageKind.Heartbeat : MessageKind.Control;
                 }

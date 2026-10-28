@@ -45,9 +45,9 @@ public class ClassifyTests
             [.. Directory.GetFiles(Path.Combine(AppContext.BaseDirectory, "Fixtures", exchange))
                 .Select(f => Path.GetFileName(f).Split('-', '.')[0]).Distinct().Order()];
 
-        Assert.Equal(["control", "data", "error", "heartbeat"], kinds("kraken"));
-        Assert.Equal(["control", "data", "error", "heartbeat"], kinds("coinbase"));
-        Assert.Equal(["control", "data", "error"], kinds("binance"));
+        Assert.Equal(["control", "data", "error", "heartbeat", "trade"], kinds("kraken"));
+        Assert.Equal(["control", "data", "error", "heartbeat", "trade"], kinds("coinbase"));
+        Assert.Equal(["control", "data", "error", "trade"], kinds("binance"));
     }
 
     [Theory]

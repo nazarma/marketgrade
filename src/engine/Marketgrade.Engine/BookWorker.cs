@@ -71,6 +71,7 @@ internal sealed class BookWorker
     // Written by this worker, read by the status loop.
     private long _dataMessages;
     private long _heartbeatMessages;
+    private long _tradeMessages;
     private long _controlMessages;
     private long _errorMessages;
     private long _bytes;
@@ -149,6 +150,8 @@ internal sealed class BookWorker
     public long DataMessages => Interlocked.Read(ref _dataMessages);
 
     public long HeartbeatMessages => Interlocked.Read(ref _heartbeatMessages);
+
+    public long TradeMessages => Interlocked.Read(ref _tradeMessages);
 
     public long ControlMessages => Interlocked.Read(ref _controlMessages);
 
@@ -336,6 +339,9 @@ internal sealed class BookWorker
         {
             case MessageKind.Data:
                 Interlocked.Increment(ref _dataMessages);
+                break;
+            case MessageKind.Trade:
+                Interlocked.Increment(ref _tradeMessages);
                 break;
             case MessageKind.Heartbeat:
                 Interlocked.Increment(ref _heartbeatMessages);

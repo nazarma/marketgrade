@@ -1,0 +1,1 @@
+{"channel":"market_trades","timestamp":"2026-10-28T22:30:28.849770039Z","sequence_num":12,"events":[{"type":"update","trades":[{"product_id":"BTC-USD","trade_id":"1111728855","price":"81176.77","size":"0.0005797","time":"2026-10-28T22:30:28.758187Z","side":"SELL"}]}]}

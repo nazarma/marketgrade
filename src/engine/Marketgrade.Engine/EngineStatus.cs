@@ -25,7 +25,7 @@ public sealed record RecordingStatus(
     long DroppedMessages,
     string? LastError);
 
-/// <param name="MessagesPerSecond">Data messages only; heartbeats, control and error messages are counted separately.</param>
+/// <param name="MessagesPerSecond">Book data messages only; trade, heartbeat, control and error messages are counted separately.</param>
 /// <param name="BytesPerSecond">All message bytes.</param>
 /// <param name="MsSinceLastMessage">Time since the last message or connect, or null before the first connect.</param>
 /// <param name="ReconnectCount">Reconnects after failures; scheduled closes by the exchange are not counted.</param>
@@ -73,4 +73,5 @@ public sealed record ExchangeStatus(
     long CatchUpMessages = 0,
     double? CatchUpMaxDelayMs = null,
     double? ExchangeHoldP50Ms = null,
-    double? ExchangeHoldP99Ms = null);
+    double? ExchangeHoldP99Ms = null,
+    long TradeMessages = 0);

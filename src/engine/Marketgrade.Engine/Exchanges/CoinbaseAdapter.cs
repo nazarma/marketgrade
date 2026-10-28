@@ -23,6 +23,7 @@ public sealed class CoinbaseAdapter(Uri? uri = null, Uri? restUri = null) : Exch
     public override IReadOnlyList<byte[]> SubscribeMessages { get; } =
     [
         """{"type":"subscribe","product_ids":["BTC-USD"],"channel":"level2"}"""u8.ToArray(),
+        """{"type":"subscribe","product_ids":["BTC-USD"],"channel":"market_trades"}"""u8.ToArray(),
         """{"type":"subscribe","channel":"heartbeats"}"""u8.ToArray(),
     ];
 
@@ -60,6 +61,10 @@ public sealed class CoinbaseAdapter(Uri? uri = null, Uri? restUri = null) : Exch
                     if (reader.ValueTextEquals("l2_data"u8))
                     {
                         return MessageKind.Data;
+                    }
+                    if (reader.ValueTextEquals("market_trades"u8))
+                    {
+                        return MessageKind.Trade;
                     }
                     return reader.ValueTextEquals("heartbeats"u8) ? MessageKind.Heartbeat : MessageKind.Control;
                 }

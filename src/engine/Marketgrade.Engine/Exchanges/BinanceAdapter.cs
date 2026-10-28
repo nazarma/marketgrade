@@ -5,7 +5,8 @@ using Microsoft.Extensions.Logging;
 namespace Marketgrade.Engine.Exchanges;
 
 /// <summary>
-/// Binance spot diff depth stream. The stream is named in the URL, so nothing is sent after connecting.
+/// Binance spot diff depth stream, named in the URL, and the trade stream, subscribed after connecting. A raw
+/// <c>/ws/</c> connection keeps payloads unwrapped after a <c>SUBSCRIBE</c>, so both arrive as plain events.
 /// Ping frames are answered by <see cref="System.Net.WebSockets.ClientWebSocket"/> itself.
 /// </summary>
 public sealed class BinanceAdapter(Uri? uri = null, Uri? restUri = null) : ExchangeAdapter
@@ -24,7 +25,10 @@ public sealed class BinanceAdapter(Uri? uri = null, Uri? restUri = null) : Excha
 
     public override Uri Uri { get; } = uri ?? DefaultUri;
 
-    public override IReadOnlyList<byte[]> SubscribeMessages { get; } = [];
+    public override IReadOnlyList<byte[]> SubscribeMessages { get; } =
+    [
+        """{"method":"SUBSCRIBE","params":["btcusdt@trade"],"id":1}"""u8.ToArray(),
+    ];
 
     public override TimeSpan? MaxConnectionLifetime => TimeSpan.FromHours(24);
 
@@ -76,7 +80,9 @@ public sealed class BinanceAdapter(Uri? uri = null, Uri? restUri = null) : Excha
                 if (reader.ValueTextEquals("e"u8))
                 {
                     reader.Read();
-                    return reader.ValueTextEquals("depthUpdate"u8) ? MessageKind.Data : MessageKind.Control;
+                    return reader.ValueTextEquals("depthUpdate"u8) ? MessageKind.Data
+                        : reader.ValueTextEquals("trade"u8) ? MessageKind.Trade
+                        : MessageKind.Control;
                 }
                 if (reader.ValueTextEquals("code"u8) || reader.ValueTextEquals("error"u8))
                 {
