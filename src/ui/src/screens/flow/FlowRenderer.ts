@@ -42,6 +42,8 @@ const TRAIL = 70;
 const TRAIL_MAX = 28;
 /** The ring texture's diameter, in its 64 px. */
 const RING_TEXTURE_SIZE = 58;
+/** Up to this many particles in a lane shine at full brightness; more dim it, so the glow does not burn out. */
+const FULL_EXPOSURE = 120;
 
 /** Particle modes. */
 const FREE = 0;
@@ -92,6 +94,9 @@ export class FlowRenderer {
 
   // Per lane: the mid price shown (eased) and its target; depth bars' prices and widths.
   private readonly mid = new Float64Array(LANES);
+  /** Brightness of each lane's particles, from how many were alive in the last frame. */
+  private readonly exposure = new Float32Array(LANES).fill(1);
+  private readonly alive = new Uint16Array(LANES);
   private readonly targetMid = new Float64Array(LANES);
   private readonly barPrice = new Float64Array(LANES * LEVELS * 2);
   private readonly barTarget = new Float32Array(LANES * LEVELS * 2);
@@ -371,13 +376,21 @@ export class FlowRenderer {
   }
 
   private drawParticles(now: number, height: number): void {
+    for (let laneIndex = 0; laneIndex < LANES; laneIndex++) {
+      this.exposure[laneIndex] = Math.min(
+        1,
+        Math.sqrt(FULL_EXPOSURE / Math.max(1, this.alive[laneIndex] ?? 0)),
+      );
+      this.alive[laneIndex] = 0;
+    }
     for (let i = 0; i < PARTICLES; i++) {
       const mode = this.mode[i];
       if (mode === FREE || mode === STATIC) {
         continue;
       }
       const particle = this.particles[i] as Particle;
-      const mid = this.mid[this.lane[i] ?? 0] ?? 0;
+      const laneIndex = this.lane[i] ?? 0;
+      const mid = this.mid[laneIndex] ?? 0;
       const age = now - (this.born[i] ?? 0);
       const scale = this.scale[i] ?? 0;
       const target = mid > 0 ? priceToY(this.price[i] ?? 0, mid, height) : height / 2;
@@ -414,6 +427,8 @@ export class FlowRenderer {
       particle.y = y;
       particle.scaleX = size;
       particle.scaleY = size;
+      this.alive[laneIndex] = (this.alive[laneIndex] ?? 0) + 1;
+      alpha *= this.exposure[laneIndex] ?? 1;
       particle.alpha = alpha;
       // Sells fall, so their trail is above them; buys rise, trailing below (the sprite flipped).
       const streak = this.trails[i] as Particle;

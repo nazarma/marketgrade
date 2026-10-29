@@ -15,6 +15,9 @@ import { useFlowRates, type FlowRates } from "@/screens/flow/useFlowRates";
 /** Price scale ticks, as fractions of the scale's half height above and below the mid. */
 const TICKS = [-2 / 3, -1 / 3, 1 / 3, 2 / 3];
 
+/** Behind the lane labels, so they stay readable over a busy lane. */
+const LABEL_BACKDROP = { background: "rgba(7,9,13,.78)" };
+
 /** The mid price label's overlay as it pulses up (green) or down (red); only its opacity is animated. */
 const PULSE_UP = {
   borderColor: "#3DDC97",
@@ -207,12 +210,22 @@ function LaneLabels({
   }, [mid, pulse]);
   return (
     <div className="relative">
-      <div className="absolute top-3.5 left-4 flex flex-col gap-0.5">
+      <div
+        className="absolute top-2.5 left-2.5 flex flex-col gap-0.5 rounded-md px-1.5 py-1"
+        style={LABEL_BACKDROP}
+      >
         <span className="text-sm font-semibold">{name}</span>
         <span className="lbl mono">{rate === undefined ? "–" : formatCount(rate)} updates/s</span>
       </div>
-      <div className="lbl absolute top-4 right-3.5">Sells ↓</div>
-      <div className="lbl absolute right-3.5 bottom-3.5">Buys ↑</div>
+      <div className="lbl absolute top-3 right-2.5 rounded-md px-1 py-0.5" style={LABEL_BACKDROP}>
+        Sells ↓
+      </div>
+      <div
+        className="lbl absolute right-2.5 bottom-2.5 rounded-md px-1 py-0.5"
+        style={LABEL_BACKDROP}
+      >
+        Buys ↑
+      </div>
       {mid === null ? (
         <div className="lbl absolute inset-x-0 top-1/2 mt-3 text-center">
           {frame ? "Waiting for a checked book" : "Connecting..."}
