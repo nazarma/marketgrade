@@ -5,7 +5,7 @@ namespace Marketgrade.Engine;
 
 /// <summary>Immutable snapshot of all exchanges, rebuilt once per status interval.</summary>
 /// <param name="Recording">Null when the engine runs without recording.</param>
-/// <param name="ClockOffsetMs">How far the local clock is ahead of NTP time, or null if unknown (delays are then uncorrected).</param>
+/// <param name="ClockOffsetMs">How far the wall clock is ahead of NTP time now, or null before the first sync (delays are then uncorrected).</param>
 public sealed record EngineStatus(
     DateTime TimeUtc,
     IReadOnlyList<ExchangeStatus> Exchanges,

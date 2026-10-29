@@ -26,7 +26,7 @@ public sealed class MarketEngine : IAsyncDisposable
     private readonly RecordingWorker? _worker;
     private readonly CancellationTokenSource _stop = new();
     private readonly HttpClient _http;
-    private readonly ClockOffset _clockOffset = new();
+    private readonly NtpClock _ntpClock = new();
     private EngineStatus _status;
     private Task? _statusLoop;
     private Task? _workerTask;
@@ -66,7 +66,7 @@ public sealed class MarketEngine : IAsyncDisposable
             var recorder = _recording is null ? null : new Queue("recorder", options.RecorderQueueCapacity);
             var connection = new ExchangeConnection(
                 adapter, Pool, [book.Writer], options, _events, _metrics, _logger, recorder?.Writer, History);
-            var worker = new BookWorker(adapter, connection, book.Channel.Reader, book.Signal, Pool, _http, _clockOffset,
+            var worker = new BookWorker(adapter, connection, book.Channel.Reader, book.Signal, Pool, _http, _ntpClock,
                 options, _events, _logger, _metrics, recorder?.Writer, history: History);
             return new Feed(adapter, connection, worker, book, _recording?.AddRecorder(adapter), recorder);
         })];
@@ -121,8 +121,11 @@ public sealed class MarketEngine : IAsyncDisposable
     public Task<PairRules> FetchPairRulesAsync(ExchangeAdapter adapter, CancellationToken cancellationToken) =>
         PairRulesClient.FetchAsync(_http, adapter, cancellationToken);
 
-    /// <summary>The measured offset of the local clock (local minus NTP time), or null if unknown. Corrects every delay from now on.</summary>
-    public void SetClockOffset(TimeSpan? offset) => _clockOffset.Set(offset);
+    /// <summary>
+    /// The NTP time at a <see cref="Stopwatch"/> timestamp, from a time server. Every delay from now
+    /// on is measured on NTP time carried forward by the monotonic clock, whatever the wall clock does.
+    /// </summary>
+    public void SyncClock(long ntpUnixNs, long timestamp) => _ntpClock.Sync(ntpUnixNs, timestamp);
 
     /// <summary>
     /// The latest copy of an exchange's best levels (by name, any case), or null if there is none yet or no
@@ -286,8 +289,9 @@ public sealed class MarketEngine : IAsyncDisposable
             feed.LastBytes = bytes;
         }
         var recording = _recording?.BuildStatus(running, _feeds.Sum(feed => feed.Connection.RecordingDropped + feed.Worker.RecordingDropped));
-        var offset = _clockOffset.Ns;
-        return new EngineStatus(DateTime.UtcNow, exchanges, recording, offset == ClockOffset.Unknown ? null : offset / 1e6);
+        var now = DateTime.UtcNow;
+        var offset = _ntpClock.OffsetNs((now.Ticks - DateTime.UnixEpoch.Ticks) * 100, Stopwatch.GetTimestamp());
+        return new EngineStatus(now, exchanges, recording, offset / 1e6);
     }
 
     private void WarnAboutFullQueues()

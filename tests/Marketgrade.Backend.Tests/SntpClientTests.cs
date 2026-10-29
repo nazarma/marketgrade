@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 
@@ -13,9 +14,30 @@ public class SntpClientTests
         // The server's clock is 2 seconds behind ours, so ours is 2 seconds ahead.
         using var server = new FakeTimeServer(request => Answer(request, DateTime.UtcNow.AddSeconds(-2)));
 
-        var offset = await SntpClient.QueryOffsetAsync("127.0.0.1", server.Port, TimeSpan.FromSeconds(2), Token);
+        var sample = await SntpClient.QueryAsync("127.0.0.1", server.Port, TimeSpan.FromSeconds(2), Token);
 
-        Assert.InRange(offset.TotalMilliseconds, 1_950, 2_050);
+        Assert.InRange(sample.Offset.TotalMilliseconds, 1_950, 2_050);
+        Assert.InRange(sample.RoundTrip.TotalMilliseconds, 0, 50);
+        Assert.InRange(Stopwatch.GetElapsedTime(sample.Timestamp).TotalMilliseconds, 0, 1_000);
+    }
+
+    [Fact]
+    public async Task Round_trip_leaves_out_the_time_the_server_took()
+    {
+        // The server holds the request for 200 ms and says so.
+        using var server = new FakeTimeServer(request =>
+        {
+            var received = DateTime.UtcNow;
+            Thread.Sleep(200);
+            var answer = Answer(request, DateTime.UtcNow);
+            SntpClient.WriteTimestamp(answer.AsSpan(32), received);
+            return answer;
+        });
+
+        var sample = await SntpClient.QueryAsync("127.0.0.1", server.Port, TimeSpan.FromSeconds(2), Token);
+
+        Assert.InRange(sample.RoundTrip.TotalMilliseconds, 0, 50);
+        Assert.InRange(sample.Offset.TotalMilliseconds, -50, 50);
     }
 
     [Fact]
@@ -29,7 +51,7 @@ public class SntpClientTests
         });
 
         await Assert.ThrowsAsync<InvalidDataException>(() =>
-            SntpClient.QueryOffsetAsync("127.0.0.1", server.Port, TimeSpan.FromSeconds(2), Token));
+            SntpClient.QueryAsync("127.0.0.1", server.Port, TimeSpan.FromSeconds(2), Token));
     }
 
     [Fact]
@@ -38,7 +60,7 @@ public class SntpClientTests
         using var server = new FakeTimeServer(_ => null);
 
         await Assert.ThrowsAsync<TimeoutException>(() =>
-            SntpClient.QueryOffsetAsync("127.0.0.1", server.Port, TimeSpan.FromMilliseconds(200), Token));
+            SntpClient.QueryAsync("127.0.0.1", server.Port, TimeSpan.FromMilliseconds(200), Token));
     }
 
     [Fact]

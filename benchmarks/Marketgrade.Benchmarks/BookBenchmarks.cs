@@ -72,7 +72,7 @@ public class BookBenchmarks
         var events = new ConnectionEventLog(200);
         var queue = Channel.CreateUnbounded<MessageBuffer>();
         var connection = new ExchangeConnection(adapter, _pool, [queue.Writer], options, events);
-        _worker = new BookWorker(adapter, connection, queue.Reader, new ManualResetEventSlim(), _pool, _http, new ClockOffset(),
+        _worker = new BookWorker(adapter, connection, queue.Reader, new ManualResetEventSlim(), _pool, _http, SyncedClock(),
             options, events, NullLogger.Instance);
         _worker.FlowEnabled = Flow;
         _worker.Prepare(Fixtures.RulesFor(Exchange));
@@ -158,6 +158,14 @@ public class BookBenchmarks
         buffer.ArrivalUnixNs = header.ArrivalUnixNs;
         buffer.Counter = 1;
         return buffer;
+    }
+
+    /// <summary>Synced, so every delay goes through the NTP time from the monotonic clock.</summary>
+    private static NtpClock SyncedClock()
+    {
+        var clock = new NtpClock();
+        clock.Sync((DateTime.UtcNow.Ticks - DateTime.UnixEpoch.Ticks) * 100, System.Diagnostics.Stopwatch.GetTimestamp());
+        return clock;
     }
 }
 

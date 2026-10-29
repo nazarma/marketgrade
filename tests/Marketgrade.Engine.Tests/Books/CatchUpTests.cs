@@ -24,7 +24,7 @@ public sealed class CatchUpTests : IDisposable
         var events = new ConnectionEventLog(50);
         var queue = Channel.CreateUnbounded<MessageBuffer>();
         var connection = new ExchangeConnection(adapter, _pool, [queue.Writer], options, events);
-        _worker = new BookWorker(adapter, connection, queue.Reader, new ManualResetEventSlim(), _pool, _http, new ClockOffset(),
+        _worker = new BookWorker(adapter, connection, queue.Reader, new ManualResetEventSlim(), _pool, _http, new NtpClock(),
             options, events, NullLogger.Instance);
         _worker.Prepare(new PairRules(1, "BTC/USD", 1, 8));
     }

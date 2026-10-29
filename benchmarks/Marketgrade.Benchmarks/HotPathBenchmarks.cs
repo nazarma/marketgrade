@@ -82,7 +82,7 @@ public class HotPathBenchmarks
         }
         _connection = new ExchangeConnection(adapter, pool, [_writer], options, events, _metrics, recorder: _recorderQueue?.Writer);
         _http = new HttpClient();
-        _worker = new BookWorker(adapter, _connection, _queue.Reader, signal, pool, _http, new ClockOffset(), options, events,
+        _worker = new BookWorker(adapter, _connection, _queue.Reader, signal, pool, _http, SyncedClock(), options, events,
             NullLogger.Instance, _metrics, _recorderQueue?.Writer);
         _worker.Start(rules: null);
     }
@@ -220,5 +220,13 @@ public class HotPathBenchmarks
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
 
         public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    /// <summary>Synced, so every delay goes through the NTP time from the monotonic clock.</summary>
+    private static NtpClock SyncedClock()
+    {
+        var clock = new NtpClock();
+        clock.Sync((DateTime.UtcNow.Ticks - DateTime.UnixEpoch.Ticks) * 100, System.Diagnostics.Stopwatch.GetTimestamp());
+        return clock;
     }
 }

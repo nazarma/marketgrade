@@ -45,7 +45,7 @@ internal sealed class BookWorker
     private readonly ChannelWriter<MessageBuffer>? _recorder;
     private readonly MessageBufferPool _pool;
     private readonly HttpClient _http;
-    private readonly ClockOffset _clockOffset;
+    private readonly NtpClock _ntpClock;
     private readonly EngineOptions _options;
     private readonly ConnectionEventLog _events;
     private readonly EngineMetrics? _metrics;
@@ -126,7 +126,7 @@ internal sealed class BookWorker
         ManualResetEventSlim signal,
         MessageBufferPool pool,
         HttpClient http,
-        ClockOffset clockOffset,
+        NtpClock ntpClock,
         EngineOptions options,
         ConnectionEventLog events,
         ILogger logger,
@@ -141,7 +141,7 @@ internal sealed class BookWorker
         _signal = signal;
         _pool = pool;
         _http = http;
-        _clockOffset = clockOffset;
+        _ntpClock = ntpClock;
         _options = options;
         _events = events;
         _logger = logger;
@@ -214,7 +214,7 @@ internal sealed class BookWorker
 
     public int MaxAskLevels => Volatile.Read(ref _maxAskLevels);
 
-    /// <summary>Delay percentiles over the last minute in nanoseconds; 0 without data. Clock-corrected when the offset is known.</summary>
+    /// <summary>Delay percentiles over the last minute in nanoseconds; 0 without data. On NTP time once the clock is synced.</summary>
     public long DelayP50Ns => Interlocked.Read(ref _delayP50);
 
     public long DelayP99Ns => Interlocked.Read(ref _delayP99);
@@ -382,8 +382,9 @@ internal sealed class BookWorker
             var exchangeTime = _handler.ExchangeUnixNs;
             if (exchangeTime != 0)
             {
-                var offset = _clockOffset.Ns;
-                RecordDelay(buffer.ArrivalUnixNs, buffer.ArrivalUnixNs - exchangeTime - (offset == ClockOffset.Unknown ? 0 : offset));
+                // NTP time at arrival from the monotonic clock; the wall clock until the first sync.
+                var arrival = _ntpClock.TryUnixNs(buffer.ReceivedTimestamp, out var ntp) ? ntp : buffer.ArrivalUnixNs;
+                RecordDelay(buffer.ArrivalUnixNs, arrival - exchangeTime);
             }
             if (_handler.ExchangeHoldNs != BookHandler.NoHold)
             {

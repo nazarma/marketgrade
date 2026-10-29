@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
@@ -324,11 +325,11 @@ public class BookWorkerTests
         Assert.Null(engine.Status.ClockOffsetMs);
 
         // As if this clock ran 10 minutes behind: every corrected delay grows by that much.
-        engine.SetClockOffset(TimeSpan.FromMinutes(-10));
+        engine.SyncClock((DateTime.UtcNow.Ticks - DateTime.UnixEpoch.Ticks) * 100 + 600_000 * 1_000_000L, Stopwatch.GetTimestamp());
         engine.Start([s_binance]);
         await WaitUntilAsync(() => engine.Status is { ClockOffsetMs: not null, Exchanges: [{ DelayP50Ms: not null }] });
 
-        Assert.Equal(-600_000, engine.Status.ClockOffsetMs);
+        Assert.InRange(engine.Status.ClockOffsetMs!.Value, -600_001, -599_999);
         Assert.InRange(engine.Status.Exchanges[0].DelayP50Ms!.Value, 590_000, 610_000);
     }
 

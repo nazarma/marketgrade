@@ -64,7 +64,7 @@ builder.Services.AddSingleton(services => new HistoryQueries(
     [.. services.GetRequiredService<MarketEngine>().Adapters.Select(adapter => (adapter.Id, adapter.Name))]));
 builder.Services.AddHostedService(services => services.GetRequiredService<HistoryWriter>());
 builder.Services.AddHostedService<EngineHostedService>();
-builder.Services.AddHostedService<ClockOffsetService>();
+builder.Services.AddHostedService<ClockSyncService>();
 builder.Services.AddSingleton<BackendMetrics>();
 builder.Services.AddHostedService<LivePushService>();
 builder.Services.AddSingleton<FlowSubscriptions>();

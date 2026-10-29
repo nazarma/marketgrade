@@ -318,8 +318,11 @@ messages and logged; the replay then reports the Binance range as missing a snap
 - *Exchange timestamp* is the time the exchange puts on the message: Kraken's `timestamp` in each
   `data` entry, Coinbase's envelope `timestamp` (when Coinbase sent the message) and Binance's `E`
   (event time, in milliseconds).
-- *Delay* = arrival time − exchange timestamp − clock offset. It covers the way from the exchange to
-  this computer, nothing after the arrival time. Catch-up messages are not part of it (below).
+- *Delay* = NTP time at arrival − exchange timestamp. NTP time at arrival is the NTP time of the last
+  clock sync plus the monotonic time from that sync to the message's `Stopwatch` timestamp, so a step of
+  the wall clock changes no delay; before the first sync it is the arrival time. Recorded arrival times
+  stay wall-clock. The delay covers the way from the exchange to this computer, nothing after the
+  arrival. Catch-up messages are not part of it (below).
 - *Catch-up*: a message whose arrival time is at most 100 ms after a snapshot's (the snapshot itself
   included) is catch-up. For Kraken and Coinbase the snapshot is the WebSocket message that rebuilt
   the book; for Binance the window starts when the REST snapshot is applied. Coinbase sends its
@@ -359,12 +362,28 @@ used to push its p99 to 600 to 900 ms for a minute, which is now catch-up; Coinb
 36 µs at the median and 100 µs at the 99th percentile, and 144 ms for the messages that wait while the
 Coinbase snapshot is applied.
 
-**Clock offset.** The backend measures the offset with a small SNTP client (UDP port 123,
-`time.apple.com`, then `pool.ntp.org`) at start and every 10 minutes, and passes it to the engine; the
-offset is the local clock minus NTP time. Without an answer the offset is unknown, delays are shown
-uncorrected with a warning, and the next attempt is after a minute; an offset above 50 ms is shown
-with a warning too. The development machine's clock drifted from 16 to 80 ms behind NTP within a
-few days, and was 2.2 s behind a week later, which makes uncorrected delays meaningless.
+**Clock sync.** The backend asks a time server (SNTP, UDP port 123, `time.apple.com`, then
+`pool.ntp.org`) 8 times, 100 ms apart, and keeps the answer with the shortest round trip, whose error
+is at most half of it (about 5 ms here). The answer is the NTP time at a `Stopwatch` timestamp, which
+the engine carries forward with the monotonic clock. It syncs at start and every 10 minutes, and every
+second compares how far the wall clock and the monotonic clock have moved since the last sync: when
+they differ by more than 20 ms (macOS stepped or slewed the time, or the Mac slept) it logs "Clock
+corrected by X ms" and syncs at once. Without an answer it tries again after a minute and keeps the
+last sync; before the first one delays are uncorrected. The status's `clockOffsetMs` is the wall clock
+minus NTP time now, logged as a warning above 50 ms. The development machine's clock drifted from 16 to
+80 ms behind NTP within a few days and was 2.2 s behind a week later; on 29 October macOS moved it by
+2.15 s while the app ran, and with the earlier design (one request, its offset subtracted from
+wall-clock arrival times) every delay was 2.2 s too high for 6 minutes, until the next sync.
+
+Measured over 30 minutes on 29 October, with a sync of each kind every minute against `time.apple.com`:
+macOS moved the wall clock twice, by −35 ms at 21:32 (the backend logged "Clock corrected by −20.8 ms"
+while it slewed) and by −16 ms at 21:47, and let it drift about +0.5 ms a minute in between, so the
+offset spread over 50 ms. One request and the best of 8 agree on it within 4 ms (round trip 12.4 and
+9.9 ms at the median, minute-to-minute noise 1.4 and 1.1 ms). With the earlier design each such move
+shifted every delay by its size until the next sync, enough to take Kraken's 8 to 20 ms below zero. NTP
+time carried by the monotonic clock matched a new sync within 1.8 ms after a minute and by 5 to 8 ms
+after 10 minutes: the monotonic clock runs 11 ppm slow, so delays drift down by up to 7 ms before each
+regular sync.
 
 **Statistics.** Delay, exchange hold time, queue wait and processing time each go into a log-linear
 histogram per exchange: exact up to 63 ns, then 64 buckets per power of two, so a percentile is
