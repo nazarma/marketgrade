@@ -48,21 +48,21 @@ export function delayChartData(
   return { x: [...minuteTimes, nowMs].map((t) => t / 1000), y, exchanges };
 }
 
-/** A marker per gap that started in the range, from the gap log and the live status (a gap still open). */
+/**
+ * A marker per gap that started in the range, from the gap log and the live status (a gap still open);
+ * gaps of several exchanges within the same minute share one marker.
+ */
 export function gapMarkers(
   gaps: GapEntry[] | undefined,
   live: ExchangeStatus[],
   fromMs: number,
 ): GapMarker[] {
-  const markers = new Map<string, GapMarker>();
+  const starts = new Map<string, { exchange: string; start: number }>();
   const add = (exchange: string, startUtc: string) => {
     const start = parseTime(startUtc);
     if (start >= fromMs) {
       // The gap log and the status write the same time with different precision.
-      markers.set(`${exchange} ${Math.round(start / 1000)}`, {
-        timeSec: start / 1000,
-        label: `${exchange} gap`,
-      });
+      starts.set(`${exchange} ${Math.round(start / 1000)}`, { exchange, start });
     }
   };
   for (const gap of gaps ?? []) {
@@ -73,7 +73,18 @@ export function gapMarkers(
       add(exchange.name, exchange.lastGap.startUtc);
     }
   }
-  return [...markers.values()].sort((a, b) => a.timeSec - b.timeSec);
+  const markers: { start: number; exchanges: string[] }[] = [];
+  for (const { exchange, start } of [...starts.values()].sort((a, b) => a.start - b.start)) {
+    const last = markers.at(-1);
+    if (last && start - last.start < 60_000) {
+      if (!last.exchanges.includes(exchange)) {
+        last.exchanges.push(exchange);
+      }
+    } else {
+      markers.push({ start, exchanges: [exchange] });
+    }
+  }
+  return markers.map((m) => ({ timeSec: m.start / 1000, label: `${m.exchanges.join(", ")} gap` }));
 }
 
 /** A round upper limit with some room above the highest value. */

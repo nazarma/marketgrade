@@ -72,6 +72,31 @@ describe("delay chart data", () => {
     expect(gapMarkers(gaps, [], Date.parse("2026-10-28T13:45:00Z"))).toEqual([]);
   });
 
+  it("gives gaps of several exchanges in the same minute one marker", () => {
+    const gap = (exchange: string, startUtc: string) => ({
+      exchangeId: 1,
+      exchange,
+      startUtc,
+      endUtc: startUtc,
+      durationSeconds: 1,
+      kind: "ConnectionLost" as const,
+      cause: "",
+      repairAction: "",
+    });
+
+    const markers = gapMarkers(
+      [
+        gap("Binance", "2026-10-28T23:49:20.894Z"),
+        gap("Kraken", "2026-10-28T23:49:20.894Z"),
+        gap("Kraken", "2026-10-28T23:55:00Z"),
+      ],
+      [],
+      Date.parse("2026-10-28T23:00:00Z"),
+    );
+
+    expect(markers.map((m) => m.label)).toEqual(["Binance, Kraken gap", "Kraken gap"]);
+  });
+
   it("rounds the top of the scale up with room above the highest value", () => {
     expect(niceMax(196)).toBe(300);
     expect(niceMax(31)).toBe(40);
