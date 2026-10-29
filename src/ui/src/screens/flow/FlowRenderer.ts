@@ -361,10 +361,12 @@ export class FlowRenderer {
       const scale = this.scale[i] ?? 0;
       const target = mid > 0 ? priceToY(this.price[i] ?? 0, mid, height) : height / 2;
       let alpha: number;
+      let done: boolean;
       let y = target;
       let size = scale;
       if (mode === REMOVAL) {
         const t = age / REMOVAL_FADE;
+        done = t >= 1;
         alpha = 0.9 * (1 - t);
         size = scale * (1 - 0.4 * t);
       } else {
@@ -373,12 +375,15 @@ export class FlowRenderer {
         if (age < travel) {
           y = start + (target - start) * easeOutCubic(age / travel);
           alpha = Math.min(0.95, age / 200);
+          done = false;
         } else {
           const fade = (age - travel - HOLD) / FADE;
+          done = fade >= 1;
           alpha = fade <= 0 ? 0.95 : 0.95 * (1 - fade);
         }
       }
-      if (alpha <= 0) {
+      // Ended by its time, not its alpha: a travelling particle is transparent on the frame it is born.
+      if (done) {
         this.release(i);
         continue;
       }
