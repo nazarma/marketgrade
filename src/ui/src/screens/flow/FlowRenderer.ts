@@ -12,11 +12,13 @@ import {
   spawnOffsets,
 } from "@/screens/flow/flowMath";
 import { ParticlePool, SpawnQueue } from "@/screens/flow/particlePool";
+import { RINGS_PER_LANE, TradeRings } from "@/screens/flow/tradeRings";
 
 export const PARTICLES = 2_000;
-const RINGS = 200;
 const LEVELS = 12;
 const LANES = 3;
+/** A lane starts at most one ring per merge window, so a few slots beyond its cap cover the rings fading out. */
+const RINGS = LANES * (RINGS_PER_LANE + 4);
 const FRAME_INTERVAL_MS = 100;
 
 const BUY = 0x3ddc97;
@@ -36,6 +38,8 @@ const HOLD = 150;
 const FADE = 450;
 const REMOVAL_FADE = 800;
 const RING_LIFE = 1_400;
+/** How long a ring pushed out by a newer one takes to fade. */
+const EVICT_FADE = 250;
 const CORE_LIFE = 320;
 /** A travelling particle's trail covers where it was this long ago, up to {@link TRAIL_MAX} pixels. */
 const TRAIL = 70;
@@ -69,7 +73,7 @@ export interface FlowRendererStats {
 export class FlowRenderer {
   private readonly app = new Application();
   private readonly pool = new ParticlePool(PARTICLES);
-  private readonly ringPool = new ParticlePool(RINGS);
+  private readonly ringState = new TradeRings(RINGS, LANES);
   private readonly queue = new SpawnQueue(4_096);
   private readonly random = lcg(7);
   private readonly particles: Particle[] = [];
@@ -87,9 +91,7 @@ export class FlowRenderer {
   private readonly born = new Float64Array(PARTICLES);
   private readonly travel = new Float32Array(PARTICLES);
   private readonly scale = new Float32Array(PARTICLES);
-  private readonly ringLane = new Uint8Array(RINGS);
   private readonly ringX = new Float32Array(RINGS);
-  private readonly ringBorn = new Float64Array(RINGS);
   private readonly ringScale = new Float32Array(RINGS);
 
   // Per lane: the mid price shown (eased) and its target; depth bars' prices and widths.
@@ -328,19 +330,18 @@ export class FlowRenderer {
   }
 
   private spawnRing(laneIndex: number, notional: number, laneWidth: number, now: number): void {
-    const i = this.ringPool.acquire();
+    const i = this.ringState.add(laneIndex, notional, now);
     if (i < 0) {
       return;
     }
-    const diameter = ringSize(notional);
-    this.ringLane[i] = laneIndex;
+    const diameter = ringSize(this.ringState.notional[i] ?? 0);
     // Clear of the mid price label on the left and inside the lane on the right.
     const left = laneWidth * 0.34 + diameter / 4;
     const right = laneWidth - diameter / 2 - 6;
-    this.ringX[i] =
-      laneIndex * laneWidth +
-      Math.max(left, Math.min(right, left + this.random() * (right - left)));
-    this.ringBorn[i] = now;
+    const start = laneIndex * laneWidth;
+    this.ringX[i] = this.ringState.merged
+      ? start + Math.max(left, Math.min(right, (this.ringX[i] ?? 0) - start))
+      : start + Math.max(left, Math.min(right, left + this.random() * (right - left)));
     this.ringScale[i] = diameter / RING_TEXTURE_SIZE;
   }
 
@@ -445,17 +446,20 @@ export class FlowRenderer {
 
   private drawRings(now: number, height: number): void {
     for (let i = 0; i < RINGS; i++) {
-      if (!this.ringPool.isActive(i)) {
+      const rings = this.ringState;
+      if (!rings.isActive(i)) {
         continue;
       }
       const ring = this.rings[i] as Particle;
       const core = this.cores[i] as Particle;
-      const age = now - (this.ringBorn[i] ?? 0);
+      const age = now - (rings.born[i] ?? 0);
       const t = age / RING_LIFE;
-      if (t >= 1 || (this.mid[this.ringLane[i] ?? 0] ?? 0) === 0) {
+      const evicted = rings.evicted[i] ?? 0;
+      const left = evicted > 0 ? 1 - (now - evicted) / EVICT_FADE : 1;
+      if (t >= 1 || left <= 0 || (this.mid[rings.lane[i] ?? 0] ?? 0) === 0) {
         ring.alpha = 0;
         core.alpha = 0;
-        this.ringPool.release(i);
+        rings.release(i);
         continue;
       }
       const full = this.ringScale[i] ?? 0;
@@ -463,10 +467,10 @@ export class FlowRenderer {
       ring.y = core.y = height / 2;
       ring.scaleX = full * (0.2 + 0.8 * easeOutCubic(t));
       ring.scaleY = ring.scaleX;
-      ring.alpha = 0.8 * (1 - t);
+      ring.alpha = 0.8 * (1 - t) * left;
       // The core flashes and is gone before the ring is half grown.
       const c = age / CORE_LIFE;
-      core.alpha = c < 1 ? 1 - c * c : 0;
+      core.alpha = c < 1 ? (1 - c * c) * left : 0;
       core.scaleX = ((full * RING_TEXTURE_SIZE * 0.3) / GLOW_CORE) * (1 - 0.4 * Math.min(1, c));
       core.scaleY = core.scaleX;
     }

@@ -13,6 +13,7 @@ import {
   spawnOffsets,
 } from "@/screens/flow/flowMath";
 import { ParticlePool, SpawnQueue } from "@/screens/flow/particlePool";
+import { RINGS_PER_LANE, TradeRings } from "@/screens/flow/tradeRings";
 
 describe("particle pool", () => {
   it("hands out every slot once, then skips and counts", () => {
@@ -117,5 +118,46 @@ describe("flow math", () => {
     const values = Array.from({ length: 100 }, a);
     expect(values).toEqual(Array.from({ length: 100 }, b));
     expect(values.every((v) => v >= 0 && v < 1)).toBe(true);
+  });
+});
+
+describe("trade rings", () => {
+  it("merges trades on a lane within 150 ms into one ring with their combined value", () => {
+    const rings = new TradeRings(30, 3);
+    const first = rings.add(0, 1_000, 0);
+    expect(rings.merged).toBe(false);
+
+    expect(rings.add(0, 500, 150)).toBe(first);
+    expect(rings.merged).toBe(true);
+    expect(rings.notional[first]).toBe(1_500);
+
+    expect(rings.add(1, 200, 160)).not.toBe(first);
+    const next = rings.add(0, 300, 151);
+    expect(next).not.toBe(first);
+    expect(rings.merged).toBe(false);
+    expect(rings.notional[first]).toBe(1_500);
+  });
+
+  it("keeps at most 6 rings per lane, the oldest fading first", () => {
+    const rings = new TradeRings(30, 3);
+    const lane0 = Array.from({ length: RINGS_PER_LANE }, (_, i) => rings.add(0, 100, i * 200));
+    const other = rings.add(1, 100, 50);
+    expect(lane0.every((i) => rings.evicted[i] === 0)).toBe(true);
+
+    rings.add(0, 100, 1_300);
+    expect(rings.evicted[lane0[0] as number]).toBe(1_300);
+    expect(lane0.slice(1).every((i) => rings.evicted[i] === 0)).toBe(true);
+    expect(rings.evicted[other]).toBe(0);
+
+    rings.add(0, 100, 1_500);
+    expect(rings.evicted[lane0[1] as number]).toBe(1_500);
+  });
+
+  it("does not merge into a ring that is gone", () => {
+    const rings = new TradeRings(30, 3);
+    const first = rings.add(2, 100, 0);
+    rings.release(first);
+    rings.add(2, 100, 50);
+    expect(rings.merged).toBe(false);
   });
 });

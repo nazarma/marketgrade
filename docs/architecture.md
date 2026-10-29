@@ -20,14 +20,16 @@ push), spread over each 100 ms as the events happened: sell book changes fall fr
 changes rise from the bottom to their price on a scale of about 0.15 % around the mid price, sized by
 notional value on a log scale (5 to 18 px) with a short trail while they move; removals fade where they
 are; trades are rings at the mid line, sized by notional value on a log scale (24 to 120 px), each with
-a brief bright core. Particles, trails and trade flashes are drawn with additive blending, so they glow
-where they overlap; a lane with more than 120 live particles dims them (to the square root of 120 over
-their number) so the glow does not burn out, and the lane labels have a dark backdrop. The best 12
-levels per side are depth bars behind them, from the lane's right edge up to 70 % of its width (square
-root of the amount), fading out towards the left and spread out from the mid where they would overlap.
-Faint lines mark the price scale, and the mid price label flashes green when the mid rises and red when
-it falls (an overlay whose opacity alone is animated, so the browser does not repaint). A fixed pool of
-2,000 sprites (with 2,000 trails and 200 rings) is reused, with particle state in typed arrays, so the
+a brief bright core. Trades on a lane within 150 ms of a ring's first trade join that ring, which grows
+to their combined value, and a lane shows at most 6 rings: a new one makes the oldest fade out over
+250 ms. Particles, trails and trade flashes are drawn with additive blending, so they glow where they
+overlap; a lane with more than 120 live particles dims them (to the square root of 120 over their
+number) so the glow does not burn out, and the lane labels have a dark backdrop. The best 12 levels per
+side are depth bars behind them, from the lane's right edge up to 70 % of its width (square root of the
+amount), fading out towards the left and spread out from the mid where they would overlap. Faint lines
+mark the price scale, and the mid price label flashes green when the mid rises and red when it falls
+(an overlay whose opacity alone is animated, so the browser does not repaint). A fixed pool of 2,000
+sprites (with 2,000 trails and 30 rings) is reused, with particle state in typed arrays, so the
 animation loop allocates nothing; when every sprite is busy a new particle is skipped and counted. The
 screen subscribes to the flow only while it is open and the window visible, and stops its render loop
 otherwise; Pause freezes the animation while the data keeps coming, and with reduced motion it shows a
