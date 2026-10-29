@@ -90,6 +90,7 @@ dotnet run --project tools/Marketgrade.Reader -- verify <folder>
 dotnet run --project tools/Marketgrade.Reader -- stats <folder>
 dotnet run --project tools/Marketgrade.Reader -- replay <file or folder>
 dotnet run --project tools/Marketgrade.Reader -- trim <file> <out.mgrec.zst> --seconds 60
+dotnet run --project tools/Marketgrade.Reader -- delays <folder> --offset-ms <clock offset>
 ```
 
 `replay` rebuilds every exchange's order book from the recordings with the same code the app uses and

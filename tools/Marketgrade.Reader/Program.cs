@@ -12,8 +12,9 @@ using ZstdSharp;
 //   dotnet run --project tools/Marketgrade.Reader -- stats <folder>
 //   dotnet run --project tools/Marketgrade.Reader -- replay <file or folder>
 //   dotnet run --project tools/Marketgrade.Reader -- trim <file> <out.mgrec.zst> --seconds N
+//   dotnet run --project tools/Marketgrade.Reader -- delays <file or folder> --offset-ms X
 const string Usage = "Usage: cat <file> [--limit N] [--payload] | verify <file or folder> | stats <folder> | replay <file or folder> "
-    + "| trim <file> <out.mgrec.zst> --seconds N";
+    + "| trim <file> <out.mgrec.zst> --seconds N | delays <file or folder> --offset-ms X";
 
 if (args.Length < 2)
 {
@@ -48,6 +49,8 @@ switch (args[0])
         return Stats(args[1]);
     case "replay":
         return await ReplayAsync(args[1]);
+    case "delays" when args.Length == 4 && args[2] == "--offset-ms":
+        return await DelaysAsync(args[1], double.Parse(args[3], CultureInfo.InvariantCulture));
     case "trim" when args.Length == 5 && args[3] == "--seconds":
         return Trim(args[1], args[2], double.Parse(args[4], CultureInfo.InvariantCulture));
     default:
@@ -221,6 +224,56 @@ static async Task<int> ReplayAsync(string target)
         }
     }
     return unexplained == 0 ? 0 : 1;
+}
+
+// The signed delay of every message with an exchange timestamp (arrival minus that timestamp, corrected by
+// the local clock's offset from NTP, which the status shows as clockOffsetMs), negatives included.
+static async Task<int> DelaysAsync(string target, double offsetMs)
+{
+    var files = File.Exists(target)
+        ? RecordingFiles.TryParse(Path.GetFullPath(target), out var single) ? [single] : throw new ArgumentException($"{target} is not in the recordings folder layout")
+        : RecordingFiles.Enumerate(target);
+    var offsetNs = (long)(offsetMs * 1e6);
+    using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+    foreach (var exchange in files.GroupBy(f => f.Exchange).OrderBy(g => g.Key))
+    {
+        var adapter = ExchangeAdapters.CreateDefault().FirstOrDefault(a => a.Name.Equals(exchange.Key, StringComparison.OrdinalIgnoreCase));
+        if (adapter is null)
+        {
+            continue;
+        }
+        var delays = new List<(long Arrival, double Ms)>();
+        var replay = new BookReplay(adapter, await RulesAsync(http, adapter))
+        {
+            ExchangeTime = (arrival, exchangeTime) => delays.Add((arrival, (arrival - exchangeTime - offsetNs) / 1e6)),
+        };
+        foreach (var file in exchange.OrderBy(f => f.Hour).ThenBy(f => f.Part))
+        {
+            using var reader = RecordingReader.Open(file.Path);
+            replay.Read(reader);
+        }
+        if (delays.Count == 0)
+        {
+            continue;
+        }
+        var sorted = delays.Select(d => d.Ms).Order().ToArray();
+        double At(double percentile) => sorted[Math.Clamp((int)Math.Ceiling(percentile / 100 * sorted.Length) - 1, 0, sorted.Length - 1)];
+        var negative = sorted.Count(d => d < 0);
+        Console.WriteLine($"{adapter.Name}: {sorted.Length} messages, {Time(delays[0].Arrival)} to {Time(delays[^1].Arrival)}");
+        Console.WriteLine($"  negative   {negative} ({100.0 * negative / sorted.Length:0.0} %)");
+        Console.WriteLine("  signed ms  " + string.Join("  ", new[] { 0.1, 1, 5, 10, 25, 50, 75, 90, 99, 99.9 }
+            .Select(p => $"p{p.ToString(CultureInfo.InvariantCulture)} {At(p):0.0}")) + $"  min {sorted[0]:0.0}  max {sorted[^1]:0.0}");
+        if (negative > 0)
+        {
+            var ahead = sorted.Take(negative).Select(d => -d).Order().ToArray();
+            double Ahead(double percentile) => ahead[Math.Clamp((int)Math.Ceiling(percentile / 100 * ahead.Length) - 1, 0, ahead.Length - 1)];
+            Console.WriteLine($"  ahead ms   (negative ones) p50 {Ahead(50):0.0}  p90 {Ahead(90):0.0}  p99 {Ahead(99):0.0}  max {ahead[^1]:0.0}");
+        }
+        Console.WriteLine("  per minute negative %: " + string.Join(" ", delays
+            .GroupBy(d => d.Arrival / 60_000_000_000)
+            .Select(g => $"{100.0 * g.Count(d => d.Ms < 0) / g.Count():0}")));
+    }
+    return 0;
 }
 
 // The rules the app uses, from the exchange; offline, the values last seen when this tool was written.

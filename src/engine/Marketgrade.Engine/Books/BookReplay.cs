@@ -64,6 +64,9 @@ public sealed class BookReplay
 
     public IReadOnlyList<ReplayFailure> Failures => _failures;
 
+    /// <summary>Called for each message with an exchange timestamp: its arrival time and that timestamp, Unix nanoseconds.</summary>
+    public Action<long, long>? ExchangeTime { get; init; }
+
     public IReadOnlyList<LiveReset> LiveResets => _resets;
 
     public IReadOnlyList<MissingSnapshot> MissingSnapshots => _missing;
@@ -134,6 +137,10 @@ public sealed class BookReplay
         var buffer = Load(record, payload);
         var outcome = _handler.Handle(buffer);
         Trades += _handler.Trades;
+        if (_handler.ExchangeUnixNs != 0)
+        {
+            ExchangeTime?.Invoke(record.ArrivalUnixNs, _handler.ExchangeUnixNs);
+        }
         switch (outcome)
         {
             case HandleOutcome.Applied:
