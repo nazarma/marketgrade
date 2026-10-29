@@ -15,13 +15,15 @@ export function RecordingLine({ recording }: { recording: RecordingStatus }) {
         <span className={dot} aria-hidden="true" />
         {badge.label}
       </span>
-      <span className="lbl mono whitespace-nowrap">
-        today {formatBytes(recording.todayBytes)} · total {formatBytes(recording.totalBytes)} ·{" "}
-        {formatBytes(recording.freeBytes)} free
+      <span className="lbl whitespace-nowrap">
+        Today <span className="mono">{formatBytes(recording.todayBytes)}</span> · Total{" "}
+        <span className="mono">{formatBytes(recording.totalBytes)}</span> · Free{" "}
+        <span className="mono">{formatBytes(recording.freeBytes)}</span>
         {recording.droppedMessages > 0 && (
           <span className="warn">
             {" "}
-            · {recording.droppedMessages.toLocaleString("en-US")} not recorded
+            · <span className="mono">{recording.droppedMessages.toLocaleString("en-US")}</span> not
+            recorded
           </span>
         )}
       </span>
