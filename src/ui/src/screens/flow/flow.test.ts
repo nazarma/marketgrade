@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   ease,
   lcg,
+  MAX_RING,
   MAX_SIZE,
+  MIN_RING,
   MIN_SIZE,
   particleSize,
   priceToY,
+  ringSize,
   sampleRatio,
   spawnOffsets,
 } from "@/screens/flow/flowMath";
@@ -66,11 +69,20 @@ describe("spawn queue", () => {
 
 describe("flow math", () => {
   it("sizes particles by notional value on a log scale, clamped", () => {
-    expect(particleSize(100)).toBe(4);
-    expect(particleSize(10_000)).toBe(10);
+    expect(particleSize(100)).toBe(5);
+    expect(particleSize(10_000)).toBe(11);
     expect(particleSize(1e9)).toBe(MAX_SIZE);
     expect(particleSize(1)).toBe(MIN_SIZE);
     expect(particleSize(0)).toBe(MIN_SIZE);
+    expect(MIN_SIZE).toBe(5);
+  });
+
+  it("sizes trade rings by notional value on a log scale, clamped", () => {
+    expect(ringSize(100)).toBe(MIN_RING);
+    expect(ringSize(10_000)).toBe(60);
+    expect(ringSize(1_000_000)).toBe(96);
+    expect(ringSize(1e12)).toBe(MAX_RING);
+    expect(ringSize(Number.NaN)).toBe(MIN_RING);
   });
 
   it("puts the mid in the centre and 0.15 % away at the edges", () => {

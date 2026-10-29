@@ -8,6 +8,7 @@ import {
   lcg,
   particleSize,
   priceToY,
+  ringSize,
   spawnOffsets,
 } from "@/screens/flow/flowMath";
 import { ParticlePool, SpawnQueue } from "@/screens/flow/particlePool";
@@ -20,8 +21,11 @@ const FRAME_INTERVAL_MS = 100;
 
 const BUY = 0x3ddc97;
 const SELL = 0xff6b78;
-const BAR_ALPHA = 0.16;
+/** At the right edge; bars fade out towards the left. */
+const BAR_ALPHA = 0.5;
 const BAR_HEIGHT = 4;
+/** The largest level's bar, as a fraction of the lane width. */
+const BAR_LENGTH = 0.7;
 /** Levels closer than this on the price scale are spread out from the mid, keeping their order. */
 const BAR_SPACING = 6;
 
@@ -32,6 +36,12 @@ const HOLD = 150;
 const FADE = 450;
 const REMOVAL_FADE = 800;
 const RING_LIFE = 1_400;
+const CORE_LIFE = 320;
+/** A travelling particle's trail covers where it was this long ago, up to {@link TRAIL_MAX} pixels. */
+const TRAIL = 70;
+const TRAIL_MAX = 28;
+/** The ring texture's diameter, in its 64 px. */
+const RING_TEXTURE_SIZE = 58;
 
 /** Particle modes. */
 const FREE = 0;
@@ -49,9 +59,10 @@ export interface FlowRendererStats {
 
 /**
  * Draws the live flow of three exchanges on one WebGL canvas, one lane each: a mid line, depth bars behind,
- * sell changes falling from the top and buy changes rising from the bottom to their price, removals fading
- * where they are, and trades as rings at the mid. It draws a sample of the events it is given, with a fixed
- * pool of sprites; the animation loop allocates nothing.
+ * sell changes falling from the top and buy changes rising from the bottom to their price with a short
+ * trail, removals fading where they are, and trades as rings at the mid, sized by their value, with a
+ * bright core. Particles, trails and trade flashes add their light (additive blending). It draws a sample
+ * of the events it is given, with a fixed pool of sprites; the animation loop allocates nothing.
  */
 export class FlowRenderer {
   private readonly app = new Application();
@@ -60,7 +71,9 @@ export class FlowRenderer {
   private readonly queue = new SpawnQueue(4_096);
   private readonly random = lcg(7);
   private readonly particles: Particle[] = [];
+  private readonly trails: Particle[] = [];
   private readonly rings: Particle[] = [];
+  private readonly cores: Particle[] = [];
   private readonly bars: Sprite[] = [];
 
   // Particle state in parallel arrays, by pool index.
@@ -75,6 +88,7 @@ export class FlowRenderer {
   private readonly ringLane = new Uint8Array(RINGS);
   private readonly ringX = new Float32Array(RINGS);
   private readonly ringBorn = new Float64Array(RINGS);
+  private readonly ringScale = new Float32Array(RINGS);
 
   // Per lane: the mid price shown (eased) and its target; depth bars' prices and widths.
   private readonly mid = new Float64Array(LANES);
@@ -118,8 +132,9 @@ export class FlowRenderer {
     this.app.canvas.style.display = "block";
     this.container.appendChild(this.app.canvas);
 
+    const fade = fadeTexture();
     for (let i = 0; i < LANES * LEVELS * 2; i++) {
-      const bar = new Sprite(Texture.WHITE);
+      const bar = new Sprite(fade);
       bar.alpha = BAR_ALPHA;
       bar.tint = i % (LEVELS * 2) < LEVELS ? SELL : BUY;
       bar.visible = false;
@@ -127,31 +142,30 @@ export class FlowRenderer {
       this.app.stage.addChild(bar);
     }
 
-    const dot = dotTexture();
-    const layer = new ParticleContainer({
-      dynamicProperties: { position: true, vertex: true, color: true, rotation: false, uvs: false },
-    });
-    for (let i = 0; i < PARTICLES; i++) {
-      const particle = new Particle({ texture: dot, anchorX: 0.5, anchorY: 0.5, alpha: 0 });
-      this.particles.push(particle);
-      layer.addParticle(particle);
-    }
-    this.app.stage.addChild(layer);
-
-    const ring = ringTexture();
-    const ringLayer = new ParticleContainer({
-      dynamicProperties: { position: true, vertex: true, color: true, rotation: false, uvs: false },
-    });
-    for (let i = 0; i < RINGS; i++) {
-      const particle = new Particle({ texture: ring, anchorX: 0.5, anchorY: 0.5, alpha: 0 });
-      this.rings.push(particle);
-      ringLayer.addParticle(particle);
-    }
-    this.app.stage.addChild(ringLayer);
+    // A trail's anchor is its bright end, at the particle.
+    this.addLayer(trailTexture(), PARTICLES, this.trails, 1);
+    const glow = glowTexture();
+    this.addLayer(glow, PARTICLES, this.particles, 0.5);
+    this.addLayer(ringTexture(), RINGS, this.rings, 0.5);
+    this.addLayer(glow, RINGS, this.cores, 0.5);
 
     this.app.ticker.add((ticker) => this.tick(ticker.deltaMS));
     this.ready = true;
     this.apply();
+  }
+
+  /** One additive layer of <paramref name="count"/> sprites of one texture, all hidden. */
+  private addLayer(texture: Texture, count: number, into: Particle[], anchorY: number): void {
+    const layer = new ParticleContainer({
+      dynamicProperties: { position: true, vertex: true, color: true, rotation: false, uvs: false },
+    });
+    layer.blendMode = "add";
+    for (let i = 0; i < count; i++) {
+      const particle = new Particle({ texture, anchorX: 0.5, anchorY, alpha: 0 });
+      into.push(particle);
+      layer.addParticle(particle);
+    }
+    this.app.stage.addChild(layer);
   }
 
   /** Runs the animation while the screen is visible and not paused; stopped, it costs nothing. */
@@ -242,7 +256,7 @@ export class FlowRenderer {
     for (const [, amount] of bids) {
       max = Math.max(max, amount);
     }
-    const full = (this.app.screen.width / LANES) * 0.45;
+    const full = (this.app.screen.width / LANES) * BAR_LENGTH;
     for (let level = 0; level < LEVELS; level++) {
       const ask = asks[level];
       const bid = bids[level];
@@ -262,7 +276,7 @@ export class FlowRenderer {
 
     for (let spawn = this.queue.takeDue(now); spawn; spawn = this.queue.takeDue(now)) {
       if (spawn.trade) {
-        this.spawnRing(spawn.lane, laneWidth, now);
+        this.spawnRing(spawn.lane, spawn.price * spawn.amount, laneWidth, now);
       } else {
         this.spawnParticle(spawn.lane, spawn.sell, spawn.price, spawn.amount, laneWidth, now);
       }
@@ -302,20 +316,27 @@ export class FlowRenderer {
     this.price[i] = price;
     this.born[i] = now;
     this.travel[i] = TRAVEL_MIN + this.random() * TRAVEL_SPREAD;
-    this.scale[i] = particleSize(Math.abs(amount) * price) / 16;
+    this.scale[i] = particleSize(Math.abs(amount) * price) / GLOW_CORE;
     const particle = this.particles[i] as Particle;
     particle.tint = sell ? SELL : BUY;
+    (this.trails[i] as Particle).tint = particle.tint;
   }
 
-  private spawnRing(laneIndex: number, laneWidth: number, now: number): void {
+  private spawnRing(laneIndex: number, notional: number, laneWidth: number, now: number): void {
     const i = this.ringPool.acquire();
     if (i < 0) {
       return;
     }
+    const diameter = ringSize(notional);
     this.ringLane[i] = laneIndex;
-    // Clear of the mid price label on the left.
-    this.ringX[i] = laneIndex * laneWidth + laneWidth * (0.34 + this.random() * 0.5);
+    // Clear of the mid price label on the left and inside the lane on the right.
+    const left = laneWidth * 0.34 + diameter / 4;
+    const right = laneWidth - diameter / 2 - 6;
+    this.ringX[i] =
+      laneIndex * laneWidth +
+      Math.max(left, Math.min(right, left + this.random() * (right - left)));
     this.ringBorn[i] = now;
+    this.ringScale[i] = diameter / RING_TEXTURE_SIZE;
   }
 
   /**
@@ -364,6 +385,7 @@ export class FlowRenderer {
       let done: boolean;
       let y = target;
       let size = scale;
+      let trail = 0;
       if (mode === REMOVAL) {
         const t = age / REMOVAL_FADE;
         done = t >= 1;
@@ -374,6 +396,7 @@ export class FlowRenderer {
         const start = this.sell[i] ? -12 : height + 12;
         if (age < travel) {
           y = start + (target - start) * easeOutCubic(age / travel);
+          trail = y - (start + (target - start) * easeOutCubic(Math.max(0, age - TRAIL) / travel));
           alpha = Math.min(0.95, age / 200);
           done = false;
         } else {
@@ -392,6 +415,16 @@ export class FlowRenderer {
       particle.scaleX = size;
       particle.scaleY = size;
       particle.alpha = alpha;
+      // Sells fall, so their trail is above them; buys rise, trailing below (the sprite flipped).
+      const streak = this.trails[i] as Particle;
+      const length = Math.min(TRAIL_MAX, Math.abs(trail));
+      streak.alpha = length > 1.5 ? alpha * 0.7 : 0;
+      if (length > 1.5) {
+        streak.x = particle.x;
+        streak.y = y;
+        streak.scaleX = size;
+        streak.scaleY = (trail > 0 ? length : -length) / TRAIL_TEXTURE_HEIGHT;
+      }
     }
   }
 
@@ -401,23 +434,32 @@ export class FlowRenderer {
         continue;
       }
       const ring = this.rings[i] as Particle;
-      const t = (now - (this.ringBorn[i] ?? 0)) / RING_LIFE;
+      const core = this.cores[i] as Particle;
+      const age = now - (this.ringBorn[i] ?? 0);
+      const t = age / RING_LIFE;
       if (t >= 1 || (this.mid[this.ringLane[i] ?? 0] ?? 0) === 0) {
         ring.alpha = 0;
+        core.alpha = 0;
         this.ringPool.release(i);
         continue;
       }
-      const eased = easeOutCubic(t);
-      ring.x = this.ringX[i] ?? 0;
-      ring.y = height / 2;
-      ring.scaleX = 0.15 + eased * 0.7;
+      const full = this.ringScale[i] ?? 0;
+      ring.x = core.x = this.ringX[i] ?? 0;
+      ring.y = core.y = height / 2;
+      ring.scaleX = full * (0.2 + 0.8 * easeOutCubic(t));
       ring.scaleY = ring.scaleX;
-      ring.alpha = 0.75 * (1 - t);
+      ring.alpha = 0.8 * (1 - t);
+      // The core flashes and is gone before the ring is half grown.
+      const c = age / CORE_LIFE;
+      core.alpha = c < 1 ? 1 - c * c : 0;
+      core.scaleX = ((full * RING_TEXTURE_SIZE * 0.3) / GLOW_CORE) * (1 - 0.4 * Math.min(1, c));
+      core.scaleY = core.scaleX;
     }
   }
 
   private release(i: number): void {
     (this.particles[i] as Particle).alpha = 0;
+    (this.trails[i] as Particle).alpha = 0;
     this.mode[i] = FREE;
     this.pool.release(i);
   }
@@ -449,7 +491,7 @@ export class FlowRenderer {
         particle.tint = e.side === "Sell" ? SELL : BUY;
         particle.x = laneIndex * laneWidth + laneWidth * (0.08 + this.random() * 0.78);
         particle.y = priceToY(e.price, exchange.mid, height);
-        particle.scaleX = particleSize(Math.abs(e.amount) * e.price) / 16;
+        particle.scaleX = particleSize(Math.abs(e.amount) * e.price) / GLOW_CORE;
         particle.scaleY = particle.scaleX;
         particle.alpha = 0.8;
       }
@@ -481,18 +523,62 @@ export class FlowRenderer {
   }
 }
 
-/** A soft round dot: a solid core with a glow, white so it can be tinted; 32 px across, the core about 16. */
-function dotTexture(): Texture {
+/** The solid core's diameter in {@link glowTexture}; a particle's scale is its size over this. */
+const GLOW_CORE = 16;
+
+/** A round dot with a soft glow around it, white so it can be tinted: 64 px across, the core 16. */
+function glowTexture(): Texture {
   const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 32;
+  canvas.width = canvas.height = 64;
   const context = canvas.getContext("2d") as CanvasRenderingContext2D;
-  const gradient = context.createRadialGradient(16, 16, 0, 16, 16, 16);
+  const gradient = context.createRadialGradient(32, 32, 0, 32, 32, 32);
   gradient.addColorStop(0, "rgba(255,255,255,1)");
-  gradient.addColorStop(0.45, "rgba(255,255,255,1)");
-  gradient.addColorStop(0.55, "rgba(255,255,255,0.45)");
+  gradient.addColorStop(0.22, "rgba(255,255,255,1)");
+  gradient.addColorStop(0.26, "rgba(255,255,255,0.35)");
+  gradient.addColorStop(0.45, "rgba(255,255,255,0.12)");
+  gradient.addColorStop(0.7, "rgba(255,255,255,0.03)");
   gradient.addColorStop(1, "rgba(255,255,255,0)");
   context.fillStyle = gradient;
-  context.fillRect(0, 0, 32, 32);
+  context.fillRect(0, 0, 64, 64);
+  return Texture.from(canvas);
+}
+
+const TRAIL_TEXTURE_HEIGHT = 64;
+
+/** A streak 16 px wide, soft at the sides, clear at the top and bright at the bottom. */
+function trailTexture(): Texture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 16;
+  canvas.height = TRAIL_TEXTURE_HEIGHT;
+  const context = canvas.getContext("2d") as CanvasRenderingContext2D;
+  const along = context.createLinearGradient(0, 0, 0, TRAIL_TEXTURE_HEIGHT);
+  along.addColorStop(0, "rgba(255,255,255,0)");
+  along.addColorStop(1, "rgba(255,255,255,0.8)");
+  context.fillStyle = along;
+  context.fillRect(0, 0, 16, TRAIL_TEXTURE_HEIGHT);
+  const across = context.createLinearGradient(0, 0, 16, 0);
+  across.addColorStop(0, "rgba(255,255,255,0)");
+  across.addColorStop(0.5, "rgba(255,255,255,1)");
+  across.addColorStop(1, "rgba(255,255,255,0)");
+  context.globalCompositeOperation = "destination-in";
+  context.fillStyle = across;
+  context.fillRect(0, 0, 16, TRAIL_TEXTURE_HEIGHT);
+  return Texture.from(canvas);
+}
+
+/** A bar that fades in from the left, white so it can be tinted: soft over most of its length, full at the right. */
+function fadeTexture(): Texture {
+  const canvas = document.createElement("canvas");
+  canvas.width = 128;
+  canvas.height = 4;
+  const context = canvas.getContext("2d") as CanvasRenderingContext2D;
+  const gradient = context.createLinearGradient(0, 0, 128, 0);
+  gradient.addColorStop(0, "rgba(255,255,255,0)");
+  gradient.addColorStop(0.3, "rgba(255,255,255,0.28)");
+  gradient.addColorStop(0.7, "rgba(255,255,255,0.62)");
+  gradient.addColorStop(1, "rgba(255,255,255,1)");
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 128, 4);
   return Texture.from(canvas);
 }
 

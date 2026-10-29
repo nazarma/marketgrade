@@ -1,16 +1,27 @@
 /** The lane's price scale: the mid price in the centre, this fraction of it above and below. */
 export const SCALE_FRACTION = 0.0015;
 
-/** Particle diameter in pixels from a notional value in quote currency, on a log scale: about 4 px at 100, 16 px from 1 million. */
+/** Particle diameter in pixels from a notional value in quote currency, on a log scale: 5 px up to 100, 17 px at 1 million. */
 export function particleSize(notional: number): number {
   if (!(notional > 0)) {
     return MIN_SIZE;
   }
-  return Math.min(MAX_SIZE, Math.max(MIN_SIZE, 4 + 3 * Math.log10(notional / 100)));
+  return Math.min(MAX_SIZE, Math.max(MIN_SIZE, 5 + 3 * Math.log10(notional / 100)));
 }
 
-export const MIN_SIZE = 3;
-export const MAX_SIZE = 16;
+export const MIN_SIZE = 5;
+export const MAX_SIZE = 18;
+
+/** A trade ring's full diameter in pixels from its notional value, on a log scale: 24 px up to 100, 96 px at 1 million. */
+export function ringSize(notional: number): number {
+  if (!(notional > 0)) {
+    return MIN_RING;
+  }
+  return Math.min(MAX_RING, Math.max(MIN_RING, 24 + 18 * Math.log10(notional / 100)));
+}
+
+export const MIN_RING = 24;
+export const MAX_RING = 120;
 
 /** Vertical position of a price in a lane of <paramref name="height"/> pixels, clamped to the lane. */
 export function priceToY(price: number, mid: number, height: number): number {

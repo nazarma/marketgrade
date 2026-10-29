@@ -18,10 +18,16 @@ or a label, and keyboard focus is visible.
 **Live flow.** One canvas with three lanes. The screen draws the sample the backend sends (see Live
 push), spread over each 100 ms as the events happened: sell book changes fall from the top and buy
 changes rise from the bottom to their price on a scale of about 0.15 % around the mid price, sized by
-notional value on a log scale; removals fade where they are; trades are rings at the mid line. The
-best 12 levels per side are depth bars behind them, spread out from the mid where they would overlap.
-A fixed pool of 2,000 sprites is reused, with particle state in typed arrays, so the animation loop
-allocates nothing; when every sprite is busy a new particle is skipped and counted. The screen
+notional value on a log scale (5 to 18 px) with a short trail while they move; removals fade where
+they are; trades are rings at the mid line, sized by notional value on a log scale (24 to 120 px),
+each with a brief bright core. Particles, trails and trade flashes are drawn with additive blending,
+so they glow where they overlap. The best 12 levels per side are depth bars behind them, from the
+lane's right edge up to 70 % of its width (square root of the amount), fading out towards the left
+and spread out from the mid where they would overlap. Faint lines mark the price scale, and the mid
+price label flashes green when the mid rises and red when it falls (an overlay whose opacity alone is
+animated, so the browser does not repaint). A fixed pool of 2,000 sprites (with 2,000 trails and 200
+rings) is reused, with particle state in typed arrays, so the animation loop allocates nothing; when
+every sprite is busy a new particle is skipped and counted. The screen
 subscribes to the flow only while it is open and the window visible, and stops its render loop
 otherwise; Pause freezes the animation while the data keeps coming, and with reduced motion it shows
 a still view. PixiJS generates code with `new Function` unless `pixi.js/unsafe-eval` is loaded, which

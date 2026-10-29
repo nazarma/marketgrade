@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type Ref } from "react";
 import type { ExchangeFlowFrame } from "@/api";
 import { toggleFullScreen } from "@/app/fullScreen";
 import { FullScreenIcon, PauseIcon, PlayIcon } from "@/app/icons";
@@ -14,6 +14,18 @@ import { useFlowRates, type FlowRates } from "@/screens/flow/useFlowRates";
 
 /** Price scale ticks, as fractions of the scale's half height above and below the mid. */
 const TICKS = [-2 / 3, -1 / 3, 1 / 3, 2 / 3];
+
+/** The mid price label's overlay as it pulses up (green) or down (red); only its opacity is animated. */
+const PULSE_UP = {
+  borderColor: "#3DDC97",
+  background: "rgba(61,220,151,.2)",
+  boxShadow: "0 0 14px rgba(61,220,151,.45)",
+};
+const PULSE_DOWN = {
+  borderColor: "#FF6B78",
+  background: "rgba(255,107,120,.2)",
+  boxShadow: "0 0 14px rgba(255,107,120,.45)",
+};
 
 export function FlowScreen() {
   const visible = useDocumentVisible();
@@ -132,6 +144,18 @@ function FlowLanes({
                   "linear-gradient(90deg, transparent, #3A4456 20%, #3A4456 80%, transparent)",
               }}
             />
+            {lane.frame?.mid != null &&
+              TICKS.map((tick) => (
+                <div
+                  key={tick}
+                  className="absolute inset-x-0 h-px"
+                  style={{
+                    top: `${50 + tick * 50}%`,
+                    background:
+                      "linear-gradient(90deg, transparent, rgba(139,149,165,.11) 12%, rgba(139,149,165,.11) 88%, transparent)",
+                  }}
+                />
+              ))}
           </div>
         ))}
       </div>
@@ -143,6 +167,7 @@ function FlowLanes({
             name={lane.name}
             frame={lane.frame}
             rate={rates.byExchange.get(lane.id)}
+            pulse={running && !reducedMotion}
           />
         ))}
       </div>
@@ -154,13 +179,32 @@ function LaneLabels({
   name,
   frame,
   rate,
+  pulse,
 }: {
   name: string;
   frame?: ExchangeFlowFrame;
   rate?: number;
+  pulse: boolean;
 }) {
   const mid = frame?.mid ?? null;
   const decimals = frame?.priceDecimals ?? 2;
+  const pulseUp = useRef<HTMLSpanElement>(null);
+  const pulseDown = useRef<HTMLSpanElement>(null);
+  const previousMid = useRef<number | null>(null);
+
+  // The mid price flashes green when it rises and red when it falls: an overlay fades out, which the
+  // compositor animates without repainting.
+  useEffect(() => {
+    const before = previousMid.current;
+    previousMid.current = mid;
+    if (!pulse || before === null || mid === null || mid === before) {
+      return;
+    }
+    (mid > before ? pulseUp : pulseDown).current?.animate([{ opacity: 1 }, { opacity: 0 }], {
+      duration: 700,
+      easing: "ease-out",
+    });
+  }, [mid, pulse]);
   return (
     <div className="relative">
       <div className="absolute top-3.5 left-4 flex flex-col gap-0.5">
@@ -179,13 +223,15 @@ function LaneLabels({
             className="mono absolute top-1/2 left-4 -translate-y-1/2 rounded-md border border-strong px-2 py-1 text-[13px]"
             style={{ background: "var(--mg-panel)" }}
           >
-            {formatPrice(mid, decimals)}
+            <PulseOverlay ref={pulseUp} style={PULSE_UP} />
+            <PulseOverlay ref={pulseDown} style={PULSE_DOWN} />
+            <span className="relative">{formatPrice(mid, decimals)}</span>
           </div>
           {TICKS.map((tick) => (
             <div
               key={tick}
-              className="mono absolute left-4 -translate-y-1/2 text-[10px] text-muted-foreground opacity-70"
-              style={{ top: `${50 + tick * 50}%` }}
+              className="mono absolute left-3 -translate-y-1/2 px-1 text-[10px] text-muted-foreground"
+              style={{ top: `${50 + tick * 50}%`, background: "var(--mg-canvas)", opacity: 0.8 }}
             >
               {formatPrice(mid * (1 - tick * SCALE_FRACTION), decimals)}
             </div>
@@ -193,6 +239,17 @@ function LaneLabels({
         </>
       )}
     </div>
+  );
+}
+
+function PulseOverlay({ ref, style }: { ref: Ref<HTMLSpanElement>; style: CSSProperties }) {
+  return (
+    <span
+      ref={ref}
+      aria-hidden="true"
+      className="absolute -inset-px rounded-md border opacity-0"
+      style={{ ...style, willChange: "opacity" }}
+    />
   );
 }
 
