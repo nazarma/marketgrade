@@ -34,7 +34,7 @@ export function DelayChart({ data, markers }: { data: DelayChartData; markers: G
       {
         width: element.clientWidth,
         height: HEIGHT,
-        padding: [22, 12, 0, 0],
+        padding: [22, 22, 0, 0],
         legend: { show: false },
         cursor: { drag: { x: false, y: false }, points: { size: 7 } },
         scales: {
@@ -126,6 +126,8 @@ function drawMarkers(u: uPlot, markers: GapMarker[]) {
   ctx.save();
   ctx.font = LABEL_FONT.replace("11px", `${11 * ratio}px`);
   ctx.textBaseline = "bottom";
+  // uPlot leaves the alignment of its last axis labels (right) behind.
+  ctx.textAlign = "left";
   let lastRight = -Infinity;
   let row = 0;
   for (const marker of markers) {
@@ -143,9 +145,10 @@ function drawMarkers(u: uPlot, markers: GapMarker[]) {
 
     const label = `${marker.label} ${formatClock(marker.timeSec * 1000)}`;
     const textWidth = ctx.measureText(label).width;
-    // Right of the line, or left of it near the right edge.
-    const textX =
+    // Right of the line, or left of it near the right edge, and never outside the plot.
+    const preferred =
       x + 4 * ratio + textWidth > left + width ? x - 4 * ratio - textWidth : x + 4 * ratio;
+    const textX = Math.max(left, Math.min(preferred, left + width - textWidth));
     row = textX < lastRight + 6 * ratio ? row + 1 : 0;
     lastRight = textX + textWidth;
     ctx.fillStyle = WARNING;

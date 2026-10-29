@@ -313,7 +313,8 @@ export class FlowRenderer {
       return;
     }
     this.ringLane[i] = laneIndex;
-    this.ringX[i] = laneIndex * laneWidth + laneWidth * (0.25 + this.random() * 0.55);
+    // Clear of the mid price label on the left.
+    this.ringX[i] = laneIndex * laneWidth + laneWidth * (0.34 + this.random() * 0.5);
     this.ringBorn[i] = now;
   }
 
