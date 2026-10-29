@@ -5,7 +5,9 @@ namespace Marketgrade.Backend.History;
 /// <param name="Points">Oldest first; a minute without a row is a minute the app was not running.</param>
 public sealed record ExchangeDelays(int Id, string Exchange, IReadOnlyList<DelayPoint> Points);
 
-public sealed record DelayPoint(DateTime MinuteUtc, double? P50Ms, double? P99Ms);
+/// <param name="LowerBound">So many of the minute's delays were negative that these are a lower bound (see <see cref="NegativeDelays"/>).</param>
+/// <param name="AheadMs">How far below zero the negative delays went, 99th percentile; null without any.</param>
+public sealed record DelayPoint(DateTime MinuteUtc, double? P50Ms, double? P99Ms, bool LowerBound, double? AheadMs);
 
 public sealed record DelayHistory(DateTime FromUtc, DateTime ToUtc, IReadOnlyList<ExchangeDelays> Exchanges);
 
@@ -18,6 +20,8 @@ public sealed record ReconnectEntry(DateTime TimeUtc, string Reason);
 /// <param name="Uptime">Seconds with a valid book divided by seconds the app was running, 0 to 1; null if it never ran in the range.</param>
 /// <param name="DelayP50Ms">From the minutes' coarse histograms added up, so approximate (within about 12 %); likewise <paramref name="DelayP99Ms"/>.</param>
 /// <param name="DelayMaxMs">The largest delay of any minute, exact.</param>
+/// <param name="DelayLowerBound">So many delays in the range were negative that the delay figures are a lower bound (see <see cref="NegativeDelays"/>).</param>
+/// <param name="DelayAheadMs">How far below zero the negative delays went: the minutes' 99th percentiles, averaged by their counts; null without any.</param>
 public sealed record ExchangeHealth(
     int Id,
     string Exchange,
@@ -27,6 +31,8 @@ public sealed record ExchangeHealth(
     double? DelayP50Ms,
     double? DelayP99Ms,
     double? DelayMaxMs,
+    bool DelayLowerBound,
+    double? DelayAheadMs,
     long BookUpdates,
     long Trades,
     MinuteColumns Minutes,
@@ -56,11 +62,13 @@ public sealed class HistoryQueries(HistoryStore store, IReadOnlyList<(int Id, st
         var (from, to) = Range(TimeSpan.FromMinutes(minutes));
         // Two rows of one minute (a restart within it): the one with more delays measured.
         var rows = store.Query("""
-            SELECT exchange_id, minute, arg_max(delay_p50_ms, delay_count), arg_max(delay_p99_ms, delay_count)
+            SELECT exchange_id, minute, arg_max(delay_p50_ms, delay_count), arg_max(delay_p99_ms, delay_count),
+                max(delay_count), arg_max(delay_negative, delay_count), arg_max(delay_ahead_ms, delay_count)
             FROM minute_stats WHERE minute >= $from
             GROUP BY exchange_id, minute ORDER BY minute
             """,
-            r => (Id: r.GetInt32(0), Point: new DelayPoint(Utc(r.GetDateTime(1)), Double(r, 2), Double(r, 3))),
+            r => (Id: r.GetInt32(0), Point: new DelayPoint(Utc(r.GetDateTime(1)), Double(r, 2), Double(r, 3),
+                NegativeDelays.IsLowerBound(r.GetInt64(5), r.GetInt64(4)), Double(r, 6))),
             ("from", from));
         return new DelayHistory(from, to, [.. exchanges.Select(e =>
             new ExchangeDelays(e.Id, e.Name, [.. rows.Where(r => r.Id == e.Id).Select(r => r.Point)]))]);
@@ -72,7 +80,8 @@ public sealed class HistoryQueries(HistoryStore store, IReadOnlyList<(int Id, st
         var minutes = store.Query("""
             SELECT exchange_id, minute, sum(seconds_running), sum(seconds_valid), sum(seconds_invalid),
                 sum(reconnects)::BIGINT, sum(gaps_started)::BIGINT, sum(book_updates)::BIGINT, sum(trades)::BIGINT,
-                max(delay_max_ms)
+                max(delay_max_ms), sum(delay_count)::BIGINT, sum(delay_negative)::BIGINT,
+                sum(delay_ahead_ms * delay_negative)
             FROM minute_stats WHERE minute >= $from
             GROUP BY exchange_id, minute ORDER BY minute
             """,
@@ -88,6 +97,9 @@ public sealed class HistoryQueries(HistoryStore store, IReadOnlyList<(int Id, st
                 BookUpdates = r.GetInt64(7),
                 Trades = r.GetInt64(8),
                 MaxMs = Double(r, 9),
+                Delays = r.GetInt64(10),
+                Negative = r.GetInt64(11),
+                AheadWeighted = Double(r, 12) ?? 0,
             },
             ("from", from));
         var histograms = store.Query(
@@ -112,6 +124,7 @@ public sealed class HistoryQueries(HistoryStore store, IReadOnlyList<(int Id, st
             }
             var running = rows.Sum(m => m.Running);
             var valid = rows.Sum(m => m.Valid);
+            var negative = rows.Sum(m => m.Negative);
             return new ExchangeHealth(
                 e.Id,
                 e.Name,
@@ -121,6 +134,8 @@ public sealed class HistoryQueries(HistoryStore store, IReadOnlyList<(int Id, st
                 CoarseHistogram.PercentileMs(coarse, 50),
                 CoarseHistogram.PercentileMs(coarse, 99),
                 rows.Max(m => m.MaxMs),
+                NegativeDelays.IsLowerBound(negative, rows.Sum(m => m.Delays)),
+                negative > 0 ? rows.Sum(m => m.AheadWeighted) / negative : null,
                 rows.Sum(m => m.BookUpdates),
                 rows.Sum(m => m.Trades),
                 new MinuteColumns(

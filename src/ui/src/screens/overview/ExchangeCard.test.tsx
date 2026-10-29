@@ -24,6 +24,19 @@ describe("ExchangeCard", () => {
     expect(within(card).getByText("Book checked")).toBeDefined();
   });
 
+  it("marks a delay as a lower bound when many exchange timestamps were ahead", () => {
+    render(
+      <ExchangeCard
+        exchange={exchangeStatus({ delayP50Ms: 0, delayLowerBound: true, delayAheadMs: 11.6 })}
+        uptime={uptime}
+      />,
+    );
+
+    expect(screen.getByText("≤ 0.0 ms").parentElement?.title).toBe(
+      "Exchange timestamps are often ahead of internet time by about 12 ms, so this delay is a lower bound.",
+    );
+  });
+
   it("shows a blocked exchange prominently instead of its numbers", () => {
     render(
       <ExchangeCard

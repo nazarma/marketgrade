@@ -77,7 +77,27 @@ public sealed class HistoryStoreTests : IDisposable
         using var reopened = new HistoryStore(Path.Combine(_folder.Path, "history.duckdb"));
 
         Assert.Equal(1, reopened.Query("SELECT count(*) FROM minute_stats", r => r.GetInt64(0)).Single());
-        Assert.Equal(1, reopened.Query("SELECT max(version) FROM schema", r => r.GetInt32(0)).Single());
+        Assert.Equal(2, reopened.Query("SELECT max(version) FROM schema", r => r.GetInt32(0)).Single());
+    }
+
+    [Fact]
+    public void A_version_1_file_gets_the_negative_delay_columns_and_keeps_its_rows()
+    {
+        _store.Add([HistoryTestData.Minute(1, s_noon, negative: 7, aheadMs: 3.5)]);
+        // As step 5 left it: without the columns of migration 2 (DuckDB drops columns only without an index).
+        _store.Query("DROP INDEX minute_stats_minute", r => 0);
+        _store.Query("ALTER TABLE minute_stats DROP COLUMN delay_ahead_ms", r => 0);
+        _store.Query("ALTER TABLE minute_stats DROP COLUMN delay_negative", r => 0);
+        _store.Query("CREATE INDEX minute_stats_minute ON minute_stats (minute)", r => 0);
+        _store.Query("DELETE FROM schema WHERE version = 2", r => 0);
+        _store.Dispose();
+
+        using var reopened = new HistoryStore(Path.Combine(_folder.Path, "history.duckdb"));
+
+        var row = reopened.Query("SELECT delay_count, delay_negative, delay_ahead_ms FROM minute_stats",
+            r => (Delays: r.GetInt64(0), Negative: r.GetInt64(1), AheadNull: r.IsDBNull(2))).Single();
+        Assert.Equal((100, 0, true), row);
+        Assert.Equal(2, reopened.Query("SELECT max(version) FROM schema", r => r.GetInt32(0)).Single());
     }
 
     [Fact]

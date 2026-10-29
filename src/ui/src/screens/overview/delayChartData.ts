@@ -1,4 +1,4 @@
-import type { DelayHistory, ExchangeStatus, GapEntry } from "@/api";
+import type { DelayHistory, DelayPoint, ExchangeStatus, GapEntry } from "@/api";
 import { parseTime } from "@/lib/format";
 
 const MINUTE_MS = 60_000;
@@ -8,6 +8,9 @@ export interface DelayChartData {
   x: number[];
   /** Per exchange, in the order of {@link exchanges}: median delay in ms, null where there is no data. */
   y: (number | null)[][];
+  /** Per exchange and point, like {@link y}: whether the delay is a lower bound, and how far ahead the timestamps were. */
+  lowerBound: boolean[][];
+  aheadMs: (number | null)[][];
   exchanges: { id: number; name: string }[];
 }
 
@@ -37,15 +40,26 @@ export function delayChartData(
       ? live.map((e) => ({ id: e.id, name: e.name }))
       : (history?.exchanges ?? []).map((e) => ({ id: e.id, name: e.exchange }));
 
-  const y = exchanges.map(({ id }) => {
-    const byMinute = new Map<number, number | null>();
+  const series = exchanges.map(({ id }) => {
+    const byMinute = new Map<number, DelayPoint>();
     for (const point of history?.exchanges.find((e) => e.id === id)?.points ?? []) {
-      byMinute.set(parseTime(point.minuteUtc), point.p50Ms);
+      byMinute.set(parseTime(point.minuteUtc), point);
     }
-    const now = live.find((e) => e.id === id)?.delayP50Ms ?? null;
-    return [...minuteTimes.map((t) => byMinute.get(t) ?? null), now];
+    const points = minuteTimes.map((t) => byMinute.get(t));
+    const now = live.find((e) => e.id === id);
+    return {
+      y: [...points.map((p) => p?.p50Ms ?? null), now?.delayP50Ms ?? null],
+      lowerBound: [...points.map((p) => p?.lowerBound ?? false), now?.delayLowerBound ?? false],
+      aheadMs: [...points.map((p) => p?.aheadMs ?? null), now?.delayAheadMs ?? null],
+    };
   });
-  return { x: [...minuteTimes, nowMs].map((t) => t / 1000), y, exchanges };
+  return {
+    x: [...minuteTimes, nowMs].map((t) => t / 1000),
+    y: series.map((s) => s.y),
+    lowerBound: series.map((s) => s.lowerBound),
+    aheadMs: series.map((s) => s.aheadMs),
+    exchanges,
+  };
 }
 
 /**

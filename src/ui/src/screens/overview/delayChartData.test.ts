@@ -15,8 +15,20 @@ describe("delay chart data", () => {
           id: 2,
           exchange: "Coinbase",
           points: [
-            { minuteUtc: "2026-10-28T13:50:00Z", p50Ms: 21, p99Ms: 40 },
-            { minuteUtc: "2026-10-28T13:52:00.0000000Z", p50Ms: 23, p99Ms: 45 },
+            {
+              minuteUtc: "2026-10-28T13:50:00Z",
+              p50Ms: 21,
+              p99Ms: 40,
+              lowerBound: false,
+              aheadMs: null,
+            },
+            {
+              minuteUtc: "2026-10-28T13:52:00.0000000Z",
+              p50Ms: 1.2,
+              p99Ms: 45,
+              lowerBound: true,
+              aheadMs: 6.5,
+            },
           ],
         },
       ],
@@ -32,7 +44,9 @@ describe("delay chart data", () => {
         (now - Date.parse("2026-10-28T00:00:00Z")) / 60_000,
       ].map((m, i) => (i < 3 ? Date.parse("2026-10-28T00:00:00Z") / 1000 + m * 60 : now / 1000)),
     );
-    expect(data.y).toEqual([[21, null, 23, 22.4]]);
+    expect(data.y).toEqual([[21, null, 1.2, 22.4]]);
+    expect(data.lowerBound).toEqual([[false, false, true, false]]);
+    expect(data.aheadMs).toEqual([[null, null, 6.5, null]]);
     expect(data.exchanges).toEqual([{ id: 2, name: "Coinbase" }]);
   });
 

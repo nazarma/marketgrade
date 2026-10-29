@@ -10,6 +10,8 @@ namespace Marketgrade.Engine.History;
 /// <param name="CatchUpMessages">Messages right after a snapshot, left out of the delays.</param>
 /// <param name="Reconnects">Live connections that ended, scheduled closes included.</param>
 /// <param name="BestBid">At the end of the minute, null while the book was not valid. Likewise <paramref name="BestAsk"/> and <paramref name="Spread"/>.</param>
+/// <param name="DelayNegative">Delays below zero, counted as zero in the others (see <see cref="Books.NegativeDelays"/>).</param>
+/// <param name="DelayAheadMs">How far below zero they went, 99th percentile; null without any.</param>
 public sealed record MinuteStats(
     int ExchangeId,
     string Exchange,
@@ -35,7 +37,9 @@ public sealed record MinuteStats(
     int GapsStarted,
     decimal? BestBid,
     decimal? BestAsk,
-    decimal? Spread);
+    decimal? Spread,
+    long DelayNegative = 0,
+    double? DelayAheadMs = null);
 
 /// <summary>How a gap was found.</summary>
 public enum GapKind

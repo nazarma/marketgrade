@@ -1,5 +1,6 @@
 import type { ExchangeHealth } from "@/api";
-import { formatCompact, formatHours, formatMs, formatUptime } from "@/lib/format";
+import { formatDelay, lowerBoundNote } from "@/lib/delay";
+import { formatCompact, formatHours, formatUptime } from "@/lib/format";
 
 export function DelayVolume({
   exchanges,
@@ -43,12 +44,20 @@ export function DelayVolume({
                 e.delayMaxMs !== null &&
                 (e.delayMaxMs >= 1_000 ||
                   (e.delayP99Ms !== null && e.delayMaxMs > 5 * e.delayP99Ms));
+              const bound = e.delayLowerBound;
+              const note = bound ? lowerBoundNote(e.delayAheadMs) : undefined;
               return (
                 <tr key={e.id}>
                   <td>{e.exchange}</td>
-                  <td className="mono r">{formatMs(e.delayP50Ms)}</td>
-                  <td className="mono r">{formatMs(e.delayP99Ms)}</td>
-                  <td className={`mono r ${unusual ? "warn" : ""}`}>{formatMs(e.delayMaxMs)}</td>
+                  <td className="mono r" title={note}>
+                    {formatDelay(e.delayP50Ms, bound)}
+                  </td>
+                  <td className="mono r" title={note}>
+                    {formatDelay(e.delayP99Ms, bound)}
+                  </td>
+                  <td className={`mono r ${unusual ? "warn" : ""}`} title={note}>
+                    {formatDelay(e.delayMaxMs, bound)}
+                  </td>
                   <td className="mono r">{formatCompact(e.bookUpdates)}</td>
                   <td className="mono r">{formatCompact(e.trades)}</td>
                   <td

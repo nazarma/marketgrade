@@ -40,6 +40,9 @@ public sealed record RecordingStatus(
 /// <param name="GapsToday">Times the book became invalid today (UTC).</param>
 /// <param name="Trades">Trades parsed (a trade message can hold several), without those sent as history after subscribing.</param>
 /// <param name="TradeFailures">Trade messages that could not be read; they never affect the book.</param>
+/// <param name="DelayCount">Delays measured over the last minute, and of those <paramref name="DelayNegative"/> below zero.</param>
+/// <param name="DelayLowerBound">So many delays were negative (counted as zero) that the delay figures are a lower bound, see <see cref="NegativeDelays"/>.</param>
+/// <param name="DelayAheadMs">How far below zero the negative delays went, 99th percentile; null without any.</param>
 public sealed record ExchangeStatus(
     int Id,
     string Name,
@@ -79,4 +82,8 @@ public sealed record ExchangeStatus(
     long TradeMessages = 0,
     long Trades = 0,
     double TradesPerSecond = 0,
-    long TradeFailures = 0);
+    long TradeFailures = 0,
+    long DelayCount = 0,
+    long DelayNegative = 0,
+    bool DelayLowerBound = false,
+    double? DelayAheadMs = null);

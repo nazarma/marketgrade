@@ -324,10 +324,25 @@ messages and logged; the replay then reports the Binance range as missing a snap
   drops that sample. Kraken and Binance do not report the time of each change.
 - *Queue wait* = from the monotonic timestamp at arrival to the book worker starting on the message.
 - *Processing time* = from before parsing to after the check, with `Stopwatch.GetTimestamp()`.
+- *Negative delays*: a delay below zero (an exchange timestamp later than the corrected arrival time)
+  counts as zero in the histogram and is also counted apart, with how far below zero it went (its own
+  histogram, of which the 99th percentile is reported). The status has both for the one-minute
+  window, the history for each minute (`delay_negative`, `delay_ahead_ms`). When more than 10 % of an
+  exchange's delays in the window, the minute or the Data health range are negative, its delays there
+  are a lower bound: the cards, the Data health table and the chart's readout show them with "≤" and
+  the note "Exchange timestamps are often ahead of internet time by about X ms, so this delay is a
+  lower bound." Signed delays are not shown.
 
-Kraken's book timestamps are often later than our clock-corrected arrival time, so its median delay
-shows as 0 ms (the 99th percentile was about 20 ms, before and after step 5): Kraken's clock appears
-to run ahead of NTP time by more than the network delay to it.
+Signed delays measured over 10 minutes on 29 October (`Marketgrade.Reader delays`, below), with the
+clock 2.2 s behind NTP and corrected for it: no exchange had a negative delay. Kraken's lowest was
+7.6 ms (1st percentile 9.1 ms, median 20 ms), Coinbase's 60 ms (median 64 ms), Binance's 155 ms
+(median 158 ms). The 0 ms Kraken median seen in step 5 came from the clock offset, not from Kraken's
+clock: replaying that night's Kraken recording with each offset measured that night (−8.8, −14.7 and
+−28.5 ms) gives 47 %, 22 % and 0 % negative delays. One SNTP answer can be off by up to half its round
+trip (about ±10 ms here), and this clock gained about 0.45 ms a minute on NTP between measurements,
+so the offset can be wrong by more than Kraken's 8 ms network delay.
+`dotnet run --project tools/Marketgrade.Reader -- delays <folder> --offset-ms X` replays recordings
+and prints each exchange's signed delays, with X the status's `clockOffsetMs` at the time.
 
 Measured on a quiet October evening: Coinbase's delay is about 55 ms in steady state, and each connect
 used to push its p99 to 600 to 900 ms for a minute, which is now catch-up; Coinbase holds changes for
@@ -340,7 +355,7 @@ Coinbase snapshot is applied.
 offset is the local clock minus NTP time. Without an answer the offset is unknown, delays are shown
 uncorrected with a warning, and the next attempt is after a minute; an offset above 50 ms is shown
 with a warning too. The development machine's clock drifted from 16 to 80 ms behind NTP within a
-few days, which makes uncorrected delays meaningless.
+few days, and was 2.2 s behind a week later, which makes uncorrected delays meaningless.
 
 **Statistics.** Delay, exchange hold time, queue wait and processing time each go into a log-linear
 histogram per exchange: exact up to 63 ns, then 64 buckets per power of two, so a percentile is

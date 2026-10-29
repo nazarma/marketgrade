@@ -131,6 +131,8 @@ public class MinuteRecorderTests
         Assert.Equal(7_000, minute.ProcessingP50Ns!.Value, 7_000 * 0.02);
         Assert.Equal(34, minute.HoldP50Ms!.Value, 34 * 0.02);
         Assert.Equal(12, minute.CatchUpMessages);
+        Assert.Equal(0, minute.DelayNegative);
+        Assert.Null(minute.DelayAheadMs);
 
         Assert.Equal(0, next.DelayCount);
         Assert.Null(next.DelayP50Ms);
@@ -139,6 +141,27 @@ public class MinuteRecorderTests
         Assert.Null(next.HoldP50Ms);
         Assert.Equal(0, next.DelayHistogram.Sum());
         Assert.Equal(0, next.CatchUpMessages);
+    }
+
+    [Fact]
+    public void Negative_delays_are_counted_with_how_far_below_zero_they_went()
+    {
+        Run(0, 60);
+        for (var ms = 1; ms <= 10; ms++)
+        {
+            _recorder.Delay.Record(-ms * 1_000_000L);
+            _recorder.Ahead.Record(ms * 1_000_000L);
+        }
+
+        var minute = Advance(60)!;
+        Run(60.25, 120);
+        var next = Advance(120)!;
+
+        Assert.Equal(10, minute.DelayCount);
+        Assert.Equal(10, minute.DelayNegative);
+        Assert.Equal(10, minute.DelayAheadMs!.Value, 10 * 0.02);
+        Assert.Equal(0, next.DelayNegative);
+        Assert.Null(next.DelayAheadMs);
     }
 
     [Fact]

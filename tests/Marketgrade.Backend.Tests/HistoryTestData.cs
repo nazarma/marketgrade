@@ -16,7 +16,9 @@ internal static class HistoryTestData
         int gaps = 0,
         double delayMs = 30,
         long delays = 100,
-        double? maxMs = null)
+        double? maxMs = null,
+        long negative = 0,
+        double? aheadMs = null)
     {
         var coarse = new long[CoarseHistogram.Buckets];
         if (delays > 0)
@@ -26,6 +28,7 @@ internal static class HistoryTestData
         return new MinuteStats(exchangeId, exchangeId switch { 1 => "Kraken", 2 => "Coinbase", _ => "Binance" }, minuteUtc,
             running, running, valid, invalid, 1_000, 20, 300_000, delays,
             delays > 0 ? delayMs : null, delays > 0 ? delayMs * 2 : null, delays > 0 ? maxMs ?? delayMs * 3 : null, coarse,
-            7_000, 40_000, null, null, 0, reconnects, gaps, 81_176.77m, 81_176.78m, 0.01m);
+            7_000, 40_000, null, null, 0, reconnects, gaps, 81_176.77m, 81_176.78m, 0.01m,
+            negative, aheadMs);
     }
 }

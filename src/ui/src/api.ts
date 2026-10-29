@@ -81,6 +81,13 @@ export interface ExchangeStatus {
   tradesPerSecond: number;
   /** Trade messages that could not be read; they never affect the book. */
   tradeFailures: number;
+  /** Delays measured over the last minute, and of those the ones below zero (counted as zero). */
+  delayCount: number;
+  delayNegative: number;
+  /** More than 10 % of the delays were negative, so the delay figures are a lower bound. */
+  delayLowerBound: boolean;
+  /** How far below zero the negative delays went, 99th percentile; null without any. */
+  delayAheadMs: number | null;
 }
 
 export interface ConnectionEvent {
@@ -247,6 +254,9 @@ export interface DelayPoint {
   minuteUtc: string;
   p50Ms: number | null;
   p99Ms: number | null;
+  /** More than 10 % of the minute's delays were negative, so these are a lower bound. */
+  lowerBound: boolean;
+  aheadMs: number | null;
 }
 
 export interface DelayHistory {
@@ -277,6 +287,9 @@ export interface ExchangeHealth {
   delayP50Ms: number | null;
   delayP99Ms: number | null;
   delayMaxMs: number | null;
+  /** More than 10 % of the delays in the range were negative, so the delay figures are a lower bound. */
+  delayLowerBound: boolean;
+  delayAheadMs: number | null;
   bookUpdates: number;
   trades: number;
   minutes: MinuteColumns;

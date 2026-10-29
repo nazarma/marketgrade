@@ -86,6 +86,31 @@ public sealed class HistoryEndpointTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Minutes_with_more_than_10_percent_negative_delays_are_a_lower_bound()
+    {
+        Store.Add([HistoryTestData.Minute(1, _thisMinute.AddMinutes(-3), negative: 11, aheadMs: 6)]);
+        Store.Add([HistoryTestData.Minute(1, _thisMinute.AddMinutes(-2), negative: 10, aheadMs: 2)]);
+        Store.Add([HistoryTestData.Minute(1, _thisMinute.AddMinutes(-1))]);
+        Store.Add([HistoryTestData.Minute(2, _thisMinute.AddMinutes(-1), negative: 40, aheadMs: 12)]);
+
+        var delay = await GetAsync("/history/delay?minutes=60");
+        var points = Exchange(delay, "Kraken").GetProperty("points").EnumerateArray().ToList();
+        Assert.Equal([true, false, false], points.Select(p => p.GetProperty("lowerBound").GetBoolean()));
+        Assert.Equal(6, points[0].GetProperty("aheadMs").GetDouble());
+        Assert.Equal(JsonValueKind.Null, points[2].GetProperty("aheadMs").ValueKind);
+
+        var health = await GetAsync("/history/health?hours=24");
+        // 21 of 300 delays: not a lower bound over the range; how far ahead, averaged by count.
+        var kraken = Exchange(health, "Kraken");
+        Assert.False(kraken.GetProperty("delayLowerBound").GetBoolean());
+        Assert.Equal((11 * 6 + 10 * 2) / 21.0, kraken.GetProperty("delayAheadMs").GetDouble(), 9);
+        var coinbase = Exchange(health, "Coinbase");
+        Assert.True(coinbase.GetProperty("delayLowerBound").GetBoolean());
+        Assert.Equal(12, coinbase.GetProperty("delayAheadMs").GetDouble());
+        Assert.Equal(JsonValueKind.Null, Exchange(health, "Binance").GetProperty("delayAheadMs").ValueKind);
+    }
+
+    [Fact]
     public async Task Gaps_in_the_range_newest_first()
     {
         Store.Add(new GapRecord(1, "Kraken", _thisMinute.AddHours(-2), _thisMinute.AddHours(-2).AddSeconds(0.8), GapKind.Checksum, "Checksum mismatch: Kraken sent 1, book has 2", "Reconnected and rebuilt the book from a new snapshot"));

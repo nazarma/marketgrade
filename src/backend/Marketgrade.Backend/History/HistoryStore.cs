@@ -58,6 +58,11 @@ public sealed class HistoryStore : IDisposable
             reason VARCHAR NOT NULL
         );
         """,
+        """
+        -- DuckDB cannot add a NOT NULL column; the default fills the rows already there.
+        ALTER TABLE minute_stats ADD COLUMN delay_negative BIGINT DEFAULT 0;
+        ALTER TABLE minute_stats ADD COLUMN delay_ahead_ms DOUBLE;
+        """,
     ];
 
     private readonly Lock _lock = new();
@@ -86,7 +91,7 @@ public sealed class HistoryStore : IDisposable
                         $seconds_valid, $seconds_invalid, $book_updates, $trades, $bytes, $delay_count, $delay_p50_ms,
                         $delay_p99_ms, $delay_max_ms, $delay_histogram, $processing_p50_ns, $processing_p99_ns,
                         $hold_p50_ms, $hold_p99_ms, $catch_up_messages, $reconnects, $gaps_started, $best_bid,
-                        $best_ask, $spread)
+                        $best_ask, $spread, $delay_negative, $delay_ahead_ms)
                     """,
                     ("exchange_id", m.ExchangeId), ("exchange", m.Exchange), ("minute", m.MinuteUtc),
                     ("seconds_running", m.SecondsRunning), ("seconds_live", m.SecondsLive),
@@ -97,7 +102,8 @@ public sealed class HistoryStore : IDisposable
                     ("processing_p50_ns", m.ProcessingP50Ns), ("processing_p99_ns", m.ProcessingP99Ns),
                     ("hold_p50_ms", m.HoldP50Ms), ("hold_p99_ms", m.HoldP99Ms),
                     ("catch_up_messages", m.CatchUpMessages), ("reconnects", m.Reconnects),
-                    ("gaps_started", m.GapsStarted), ("best_bid", m.BestBid), ("best_ask", m.BestAsk), ("spread", m.Spread));
+                    ("gaps_started", m.GapsStarted), ("best_bid", m.BestBid), ("best_ask", m.BestAsk), ("spread", m.Spread),
+                    ("delay_negative", m.DelayNegative), ("delay_ahead_ms", m.DelayAheadMs));
             }
             transaction.Commit();
         }

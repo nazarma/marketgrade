@@ -42,6 +42,10 @@ export function exchangeStatus(overrides: Partial<ExchangeStatus> = {}): Exchang
     trades: 800,
     tradesPerSecond: 4.2,
     tradeFailures: 0,
+    delayCount: 1_000,
+    delayNegative: 0,
+    delayLowerBound: false,
+    delayAheadMs: null,
     ...overrides,
   };
 }

@@ -53,6 +53,8 @@ internal sealed class BookWorker
     private readonly TimeProvider _time;
     private readonly TaskCompletionSource _done = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly WindowedHistogram _delay;
+    /// <summary>How far ahead the negative delays were (their magnitude).</summary>
+    private readonly WindowedHistogram _ahead;
     private readonly WindowedHistogram _processing;
     private readonly WindowedHistogram _queueWait;
     private readonly WindowedHistogram _hold;
@@ -96,6 +98,8 @@ internal sealed class BookWorker
     private long _delayP50;
     private long _delayP99;
     private long _delayCount;
+    private long _delayNegative;
+    private long _delayAheadP99;
     private long _processingP50;
     private long _processingP99;
     private long _catchUpStart = long.MinValue;
@@ -146,6 +150,7 @@ internal sealed class BookWorker
         _time = time ?? TimeProvider.System;
         var now = _time.GetTimestamp();
         _delay = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
+        _ahead = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
         _processing = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
         _queueWait = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
         _hold = new WindowedHistogram(6, _time.TimestampFrequency * 10, now);
@@ -216,6 +221,12 @@ internal sealed class BookWorker
 
     /// <summary>Delays measured in the last minute.</summary>
     public long DelayCount => Interlocked.Read(ref _delayCount);
+
+    /// <summary>Of those, the delays below zero (counted as zero), see <see cref="NegativeDelays"/>.</summary>
+    public long DelayNegative => Interlocked.Read(ref _delayNegative);
+
+    /// <summary>How far below zero the negative delays went, 99th percentile, in nanoseconds; 0 without any.</summary>
+    public long DelayAheadP99Ns => Interlocked.Read(ref _delayAheadP99);
 
     public long ProcessingP50Ns => Interlocked.Read(ref _processingP50);
 
@@ -440,6 +451,11 @@ internal sealed class BookWorker
         }
         _delay.Record(delayNs);
         _minutes.Delay.Record(delayNs);
+        if (delayNs < 0)
+        {
+            _ahead.Record(-delayNs);
+            _minutes.Ahead.Record(-delayNs);
+        }
     }
 
     /// <summary>Opens the catch-up window at a snapshot; the counters start again.</summary>
@@ -613,6 +629,7 @@ internal sealed class BookWorker
     internal void PublishStatistics(long now)
     {
         _delay.Rotate(now);
+        _ahead.Rotate(now);
         _processing.Rotate(now);
         _queueWait.Rotate(now);
         _hold.Rotate(now);
@@ -620,6 +637,9 @@ internal sealed class BookWorker
         Interlocked.Exchange(ref _delayP50, delay.Percentile(50));
         Interlocked.Exchange(ref _delayP99, delay.Percentile(99));
         Interlocked.Exchange(ref _delayCount, delay.Count);
+        var ahead = _ahead.Merge();
+        Interlocked.Exchange(ref _delayNegative, ahead.Count);
+        Interlocked.Exchange(ref _delayAheadP99, ahead.Percentile(99));
         var processing = _processing.Merge();
         Interlocked.Exchange(ref _processingP50, processing.Percentile(50));
         Interlocked.Exchange(ref _processingP99, processing.Percentile(99));

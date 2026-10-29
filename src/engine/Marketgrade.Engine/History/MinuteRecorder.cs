@@ -23,6 +23,9 @@ internal sealed class MinuteRecorder(int exchangeId, string exchange, long aslee
 
     public LatencyHistogram Delay { get; } = new();
 
+    /// <summary>How far below zero each negative delay was.</summary>
+    public LatencyHistogram Ahead { get; } = new();
+
     public LatencyHistogram Processing { get; } = new();
 
     public LatencyHistogram Hold { get; } = new();
@@ -138,10 +141,13 @@ internal sealed class MinuteRecorder(int exchangeId, string exchange, long aslee
                 GapsStarted,
                 bid == 0 ? null : Price(bid, decimals),
                 ask == 0 ? null : Price(ask, decimals),
-                bid == 0 || ask == 0 ? null : Price(ask - bid, decimals));
+                bid == 0 || ask == 0 ? null : Price(ask - bid, decimals),
+                Ahead.Count,
+                Ahead.Count > 0 ? Ahead.Percentile(99) / 1e6 : null);
         }
 
         Delay.Clear();
+        Ahead.Clear();
         Processing.Clear();
         Hold.Clear();
         BookUpdates = Trades = Bytes = CatchUp = 0;

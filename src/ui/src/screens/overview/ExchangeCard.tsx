@@ -1,8 +1,9 @@
 import type { ExchangeStatus } from "@/api";
 import { bookBadge, connectionBadge } from "@/components/badges";
 import { StatusBadge } from "@/components/StatusBadge";
+import { formatDelay, lowerBoundNote } from "@/lib/delay";
 import { exchangeInfo } from "@/lib/exchanges";
-import { formatCount, formatHours, formatMs, formatUptime } from "@/lib/format";
+import { formatCount, formatHours, formatUptime } from "@/lib/format";
 
 /** Uptime over the last 24 hours, from the history. */
 export interface Uptime {
@@ -44,8 +45,12 @@ export function ExchangeCard({ exchange, uptime }: { exchange: ExchangeStatus; u
         <div className="grid grid-cols-2 gap-x-4 gap-y-3.5">
           <Stat
             label="Delay (median)"
-            value={formatMs(exchange.delayP50Ms)}
-            title="Exchange timestamp to arrival on this computer, last minute"
+            value={formatDelay(exchange.delayP50Ms, exchange.delayLowerBound)}
+            title={
+              exchange.delayLowerBound
+                ? lowerBoundNote(exchange.delayAheadMs)
+                : "Exchange timestamp to arrival on this computer, last minute"
+            }
           />
           <Stat
             label="Book updates/s"

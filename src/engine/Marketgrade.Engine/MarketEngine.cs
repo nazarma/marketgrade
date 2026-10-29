@@ -276,7 +276,11 @@ public sealed class MarketEngine : IAsyncDisposable
                 worker.TradeMessages,
                 trades,
                 elapsedSeconds > 0 ? (trades - feed.LastTrades) / elapsedSeconds : 0,
-                worker.TradeFailures);
+                worker.TradeFailures,
+                worker.DelayCount,
+                worker.DelayNegative,
+                NegativeDelays.IsLowerBound(worker.DelayNegative, worker.DelayCount),
+                worker.DelayNegative > 0 ? worker.DelayAheadP99Ns / 1e6 : null);
             feed.LastDataMessages = data;
             feed.LastTrades = trades;
             feed.LastBytes = bytes;

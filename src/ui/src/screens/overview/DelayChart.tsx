@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { exchangeInfo } from "@/lib/exchanges";
+import { formatDelay, lowerBoundNote } from "@/lib/delay";
 import { formatClock, formatMs } from "@/lib/format";
 import { niceMax, type DelayChartData, type GapMarker } from "@/screens/overview/delayChartData";
 
@@ -100,13 +101,27 @@ export function DelayChart({ data, markers }: { data: DelayChartData; markers: G
   }, [data]);
 
   const hoverTime = hover === null ? undefined : data.x[hover];
+  // The hovered minute's lower bounds, explained with the largest lead among them.
+  const bounds =
+    hover === null
+      ? []
+      : data.exchanges.flatMap((_e, i) =>
+          data.lowerBound[i]?.[hover] && data.y[i]?.[hover] != null
+            ? [data.aheadMs[i]?.[hover] ?? null]
+            : [],
+        );
   return (
     <div className="flex flex-col gap-1">
       <div className="lbl mono min-h-4" aria-live="off">
         {hoverTime !== undefined && hover !== null
-          ? `${formatClock(hoverTime * 1000)}  ${data.exchanges.map((e, i) => `${e.name} ${formatMs(data.y[i]?.[hover])}`).join("  ·  ")}`
+          ? `${formatClock(hoverTime * 1000)}  ${data.exchanges.map((e, i) => `${e.name} ${formatDelay(data.y[i]?.[hover], data.lowerBound[i]?.[hover] ?? false)}`).join("  ·  ")}`
           : ""}
       </div>
+      {bounds.length > 0 && (
+        <div className="lbl -mt-1">
+          {lowerBoundNote(Math.max(...bounds.map((b) => b ?? 0)) || null)}
+        </div>
+      )}
       <div
         ref={container}
         role="img"
