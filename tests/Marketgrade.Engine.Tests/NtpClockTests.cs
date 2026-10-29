@@ -33,15 +33,67 @@ public sealed class NtpClockTests : IDisposable
     [Fact]
     public void Ntp_time_is_the_synced_time_plus_the_monotonic_time_since()
     {
-        Assert.False(_clock.TryUnixNs(Stopwatch.GetTimestamp(), out _));
+        Assert.Equal(ClockReading.Unknown, _clock.Read(Stopwatch.GetTimestamp(), out _));
         Assert.Null(_clock.OffsetNs(0, Stopwatch.GetTimestamp()));
 
         var synced = Stopwatch.GetTimestamp();
         _clock.Sync(1_000 * Ms, synced);
 
-        Assert.True(_clock.TryUnixNs(synced + Ticks(250 * Ms), out var later));
+        Assert.Equal(ClockReading.Known, _clock.Read(synced + Ticks(250 * Ms), out var later));
         Assert.InRange(later, 1_250 * Ms - 1_000, 1_250 * Ms + 1_000);
         Assert.InRange(_clock.OffsetNs(1_210 * Ms, synced + Ticks(250 * Ms))!.Value, -40 * Ms - 1_000, -40 * Ms + 1_000);
+    }
+
+    [Fact]
+    public void The_monotonic_clocks_rate_error_is_applied()
+    {
+        var synced = Stopwatch.GetTimestamp();
+        // NTP time runs 120 ppm faster than the monotonic clock: 72 ms more in 10 minutes.
+        _clock.Sync(0, synced, rate: 120e-6);
+
+        _clock.Read(synced + Ticks(600_000 * Ms), out var later);
+
+        Assert.InRange(later, 600_072 * Ms - 1_000, 600_072 * Ms + 1_000);
+    }
+
+    [Fact]
+    public void Held_delays_are_skipped_and_counted_until_the_next_sync()
+    {
+        var snapshot = Timestamp(_lines[2]) - 10_000 * Ms;
+        var synced = Stopwatch.GetTimestamp();
+        _clock.Sync(snapshot, synced);
+        Process(_lines[2], wallUnixNs: snapshot, timestamp: synced);
+        void ProcessAt(int line)
+        {
+            var arrival = Timestamp(_lines[line]) + 20 * Ms;
+            Process(_lines[line], wallUnixNs: arrival, timestamp: synced + Ticks(arrival - snapshot));
+        }
+        ProcessAt(3);
+
+        _clock.Hold();
+        Assert.Equal(ClockReading.Held, _clock.Read(synced, out _));
+        Assert.Null(_clock.OffsetNs(0, synced));
+        for (var i = 4; i < 9; i++)
+        {
+            ProcessAt(i);
+        }
+        _clock.Sync(snapshot, synced);
+        ProcessAt(9);
+        _worker.PublishStatistics(Stopwatch.GetTimestamp());
+
+        Assert.Equal(2, _worker.DelayCount);
+        Assert.Equal(5, _worker.DelaySkipped);
+    }
+
+    [Fact]
+    public void Before_the_first_sync_a_hold_changes_nothing_and_clear_forgets_the_sync()
+    {
+        _clock.Hold();
+        Assert.Equal(ClockReading.Unknown, _clock.Read(Stopwatch.GetTimestamp(), out _));
+
+        _clock.Sync(0, Stopwatch.GetTimestamp());
+        _clock.Clear();
+        Assert.Equal(ClockReading.Unknown, _clock.Read(Stopwatch.GetTimestamp(), out _));
     }
 
     [Fact]

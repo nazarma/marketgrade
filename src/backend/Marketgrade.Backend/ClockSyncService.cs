@@ -14,7 +14,7 @@ public sealed class ClockSyncService(
         {
             return;
         }
-        var sync = new ClockSync(sample => engine.SyncClock(sample.NtpUnixNs, sample.Timestamp), logger);
+        var sync = new ClockSync(new EngineClock(engine), logger);
         try
         {
             while (true)
@@ -26,5 +26,14 @@ public sealed class ClockSyncService(
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
         }
+    }
+
+    private sealed class EngineClock(MarketEngine engine) : IClockTarget
+    {
+        public void Sync(long ntpUnixNs, long timestamp, double rate) => engine.SyncClock(ntpUnixNs, timestamp, rate);
+
+        public void Hold() => engine.HoldClock();
+
+        public void Clear() => engine.ClearClock();
     }
 }

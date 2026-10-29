@@ -122,10 +122,17 @@ public sealed class MarketEngine : IAsyncDisposable
         PairRulesClient.FetchAsync(_http, adapter, cancellationToken);
 
     /// <summary>
-    /// The NTP time at a <see cref="Stopwatch"/> timestamp, from a time server. Every delay from now
-    /// on is measured on NTP time carried forward by the monotonic clock, whatever the wall clock does.
+    /// The NTP time at a <see cref="Stopwatch"/> timestamp, from a time server, and how much faster NTP time
+    /// runs than the monotonic clock (a fraction; 1e-6 is 1 ppm). Every delay from now on is measured on NTP
+    /// time carried forward by the monotonic clock, whatever the wall clock does.
     /// </summary>
-    public void SyncClock(long ntpUnixNs, long timestamp) => _ntpClock.Sync(ntpUnixNs, timestamp);
+    public void SyncClock(long ntpUnixNs, long timestamp, double rate = 0) => _ntpClock.Sync(ntpUnixNs, timestamp, rate);
+
+    /// <summary>The clocks parted (a step or a wake from sleep): delays are skipped and counted until the next <see cref="SyncClock"/>.</summary>
+    public void HoldClock() => _ntpClock.Hold();
+
+    /// <summary>The last sync no longer holds (a wake from sleep without a new sync): delays use the wall clock again.</summary>
+    public void ClearClock() => _ntpClock.Clear();
 
     /// <summary>
     /// The latest copy of an exchange's best levels (by name, any case), or null if there is none yet or no
@@ -283,7 +290,8 @@ public sealed class MarketEngine : IAsyncDisposable
                 worker.DelayCount,
                 worker.DelayNegative,
                 NegativeDelays.IsLowerBound(worker.DelayNegative, worker.DelayCount),
-                worker.DelayNegative > 0 ? worker.DelayAheadP99Ns / 1e6 : null);
+                worker.DelayNegative > 0 ? worker.DelayAheadP99Ns / 1e6 : null,
+                worker.DelaySkipped);
             feed.LastDataMessages = data;
             feed.LastTrades = trades;
             feed.LastBytes = bytes;

@@ -99,6 +99,7 @@ internal sealed class BookWorker
     private long _delayP99;
     private long _delayCount;
     private long _delayNegative;
+    private long _delaySkipped;
     private long _delayAheadP99;
     private long _processingP50;
     private long _processingP99;
@@ -224,6 +225,9 @@ internal sealed class BookWorker
 
     /// <summary>Of those, the delays below zero (counted as zero), see <see cref="NegativeDelays"/>.</summary>
     public long DelayNegative => Interlocked.Read(ref _delayNegative);
+
+    /// <summary>Delays not measured since the start because the clock was being synced after a step or a wake from sleep.</summary>
+    public long DelaySkipped => Interlocked.Read(ref _delaySkipped);
 
     /// <summary>How far below zero the negative delays went, 99th percentile, in nanoseconds; 0 without any.</summary>
     public long DelayAheadP99Ns => Interlocked.Read(ref _delayAheadP99);
@@ -383,8 +387,18 @@ internal sealed class BookWorker
             if (exchangeTime != 0)
             {
                 // NTP time at arrival from the monotonic clock; the wall clock until the first sync.
-                var arrival = _ntpClock.TryUnixNs(buffer.ReceivedTimestamp, out var ntp) ? ntp : buffer.ArrivalUnixNs;
-                RecordDelay(buffer.ArrivalUnixNs, arrival - exchangeTime);
+                switch (_ntpClock.Read(buffer.ReceivedTimestamp, out var ntp))
+                {
+                    case ClockReading.Known:
+                        RecordDelay(buffer.ArrivalUnixNs, ntp - exchangeTime);
+                        break;
+                    case ClockReading.Held:
+                        Interlocked.Increment(ref _delaySkipped);
+                        break;
+                    default:
+                        RecordDelay(buffer.ArrivalUnixNs, buffer.ArrivalUnixNs - exchangeTime);
+                        break;
+                }
             }
             if (_handler.ExchangeHoldNs != BookHandler.NoHold)
             {

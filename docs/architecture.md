@@ -319,9 +319,11 @@ messages and logged; the replay then reports the Binance range as missing a snap
   `data` entry, Coinbase's envelope `timestamp` (when Coinbase sent the message) and Binance's `E`
   (event time, in milliseconds).
 - *Delay* = NTP time at arrival − exchange timestamp. NTP time at arrival is the NTP time of the last
-  clock sync plus the monotonic time from that sync to the message's `Stopwatch` timestamp, so a step of
-  the wall clock changes no delay; before the first sync it is the arrival time. Recorded arrival times
-  stay wall-clock. The delay covers the way from the exchange to this computer, nothing after the
+  clock sync plus the monotonic time from that sync to the message's `Stopwatch` timestamp, corrected by
+  the monotonic clock's measured rate error, so a step of the wall clock changes no delay; before the
+  first sync it is the arrival time. While the clock is synced again after a step or a wake from sleep
+  no delay is measured; those messages are counted (`delaySkipped` in the status). Recorded arrival
+  times stay wall-clock. The delay covers the way from the exchange to this computer, nothing after the
   arrival. Catch-up messages are not part of it (below).
 - *Catch-up*: a message whose arrival time is at most 100 ms after a snapshot's (the snapshot itself
   included) is catch-up. For Kraken and Coinbase the snapshot is the WebSocket message that rebuilt
@@ -365,25 +367,42 @@ Coinbase snapshot is applied.
 **Clock sync.** The backend asks a time server (SNTP, UDP port 123, `time.apple.com`, then
 `pool.ntp.org`) 8 times, 100 ms apart, and keeps the answer with the shortest round trip, whose error
 is at most half of it (about 5 ms here). The answer is the NTP time at a `Stopwatch` timestamp, which
-the engine carries forward with the monotonic clock. It syncs at start and every 10 minutes, and every
-second compares how far the wall clock and the monotonic clock have moved since the last sync: when
-they differ by more than 20 ms (macOS stepped or slewed the time, or the Mac slept) it logs "Clock
-corrected by X ms" and syncs at once. Without an answer it tries again after a minute and keeps the
-last sync; before the first one delays are uncorrected. The status's `clockOffsetMs` is the wall clock
-minus NTP time now, logged as a warning above 50 ms. The development machine's clock drifted from 16 to
-80 ms behind NTP within a few days and was 2.2 s behind a week later; on 29 October macOS moved it by
-2.15 s while the app ran, and with the earlier design (one request, its offset subtracted from
-wall-clock arrival times) every delay was 2.2 s too high for 6 minutes, until the next sync.
+the engine carries forward with the monotonic clock. It syncs at start and every 10 minutes. Without an
+answer it tries again after a minute and keeps the last sync; before the first one delays are
+uncorrected. The status's `clockOffsetMs` is the wall clock minus NTP time now, logged as a warning
+above 50 ms.
+
+*Rate.* The monotonic clock runs at its crystal's rate, which is not NTP's. Successive successful syncs
+give the rate error: NTP time over monotonic time from the oldest of the last 6 syncs (about an hour)
+to the newest, once they are at least 5 minutes apart, clamped to ±200 ppm. The engine applies it when
+it carries NTP time forward. It starts over (at 0) after a step, a wake from sleep, or two failed syncs
+in a row.
+
+*Steps and sleep.* Every second the backend checks two things. A clock that counts sleep
+(`CLOCK_MONOTONIC_RAW` on macOS, `CLOCK_BOOTTIME` on Linux, the tick count on Windows) getting more
+than 1 s ahead of `Stopwatch`, which stops during sleep on macOS and Linux, is a wake: delays are held,
+it syncs at once and logs "Clock re-synced after sleep"; without an answer the last sync no longer
+holds and delays are uncorrected until the next. Otherwise, when the wall clock has moved more than
+20 ms away from the monotonic clock (at its measured rate) since the last sync, macOS stepped or slewed
+the time, or the rate is not known yet: it logs "Clock corrected by X ms", holds delays and syncs at
+once; without an answer the last sync stays, as a step of the wall clock does not move the monotonic
+clock. Only a jump of more than 10 ms between two checks is a step and starts the rate over; a slow
+parting keeps it, so a clock far off its rate still learns it. Held delays are skipped and counted
+until the sync completes.
+
+The development machine's clock drifted from 16 to 80 ms behind NTP within a few days and was 2.2 s
+behind a week later; on 29 October macOS moved it by 2.15 s while the app ran, and with the earlier
+design (one request, its offset subtracted from wall-clock arrival times) every delay was 2.2 s too
+high for 6 minutes, until the next sync.
 
 Measured over 30 minutes on 29 October, with a sync of each kind every minute against `time.apple.com`:
 macOS moved the wall clock twice, by −35 ms at 21:32 (the backend logged "Clock corrected by −20.8 ms"
 while it slewed) and by −16 ms at 21:47, and let it drift about +0.5 ms a minute in between, so the
 offset spread over 50 ms. One request and the best of 8 agree on it within 4 ms (round trip 12.4 and
 9.9 ms at the median, minute-to-minute noise 1.4 and 1.1 ms). With the earlier design each such move
-shifted every delay by its size until the next sync, enough to take Kraken's 8 to 20 ms below zero. NTP
-time carried by the monotonic clock matched a new sync within 1.8 ms after a minute and by 5 to 8 ms
-after 10 minutes: the monotonic clock runs 11 ppm slow, so delays drift down by up to 7 ms before each
-regular sync.
+shifted every delay by its size until the next sync, enough to take Kraken's 8 to 20 ms below zero. The
+monotonic clock ran 11.4 ppm slow: without the rate, NTP time carried for 10 minutes was 5 to 8 ms
+behind a new sync; with the rate from the 10 minutes before, it was within −2.7 and +0.1 ms.
 
 **Statistics.** Delay, exchange hold time, queue wait and processing time each go into a log-linear
 histogram per exchange: exact up to 63 ns, then 64 buckets per power of two, so a percentile is

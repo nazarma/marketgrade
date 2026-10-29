@@ -88,6 +88,8 @@ export interface ExchangeStatus {
   delayLowerBound: boolean;
   /** How far below zero the negative delays went, 99th percentile; null without any. */
   delayAheadMs: number | null;
+  /** Delays not measured since the start while the clock was synced again after a step or a wake from sleep. */
+  delaySkipped: number;
 }
 
 export interface ConnectionEvent {

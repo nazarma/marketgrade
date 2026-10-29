@@ -43,6 +43,7 @@ public sealed record RecordingStatus(
 /// <param name="DelayCount">Delays measured over the last minute, and of those <paramref name="DelayNegative"/> below zero.</param>
 /// <param name="DelayLowerBound">So many delays were negative (counted as zero) that the delay figures are a lower bound, see <see cref="NegativeDelays"/>.</param>
 /// <param name="DelayAheadMs">How far below zero the negative delays went, 99th percentile; null without any.</param>
+/// <param name="DelaySkipped">Delays not measured since the start while the clock was synced again after a step or a wake from sleep.</param>
 public sealed record ExchangeStatus(
     int Id,
     string Name,
@@ -86,4 +87,5 @@ public sealed record ExchangeStatus(
     long DelayCount = 0,
     long DelayNegative = 0,
     bool DelayLowerBound = false,
-    double? DelayAheadMs = null);
+    double? DelayAheadMs = null,
+    long DelaySkipped = 0);

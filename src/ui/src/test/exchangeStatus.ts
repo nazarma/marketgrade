@@ -46,6 +46,7 @@ export function exchangeStatus(overrides: Partial<ExchangeStatus> = {}): Exchang
     delayNegative: 0,
     delayLowerBound: false,
     delayAheadMs: null,
+    delaySkipped: 0,
     ...overrides,
   };
 }
