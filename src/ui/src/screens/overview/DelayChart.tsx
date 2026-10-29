@@ -117,9 +117,10 @@ export function DelayChart({ data, markers }: { data: DelayChartData; markers: G
           ? `${formatClock(hoverTime * 1000)}  ${data.exchanges.map((e, i) => `${e.name} ${formatDelay(data.y[i]?.[hover], data.lowerBound[i]?.[hover] ?? false)}`).join("  ·  ")}`
           : ""}
       </div>
-      {bounds.length > 0 && (
-        <div className="lbl -mt-1">
-          {lowerBoundNote(Math.max(...bounds.map((b) => b ?? 0)) || null)}
+      {/* The line is kept while any point is a lower bound, so the chart does not move under the pointer. */}
+      {data.lowerBound.some((points) => points.includes(true)) && (
+        <div className="lbl -mt-1 min-h-4">
+          {bounds.length > 0 && lowerBoundNote(Math.max(...bounds.map((b) => b ?? 0)) || null)}
         </div>
       )}
       <div
