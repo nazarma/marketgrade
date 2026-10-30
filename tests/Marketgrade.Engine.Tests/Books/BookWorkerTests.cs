@@ -157,7 +157,7 @@ public class BookWorkerTests
 
         engine.FlowEnabled = true;
         // The worker picks the switch up after its next batch or housekeeping pass.
-        await Task.Delay(100, TestContext.Current.CancellationToken);
+        await WaitUntilAsync(() => flow.WritingRing);
         secondHalf.SetResult();
         await WaitUntilAsync(() => flow.Trades == 2);
 

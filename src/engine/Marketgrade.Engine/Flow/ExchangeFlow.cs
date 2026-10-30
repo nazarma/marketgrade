@@ -23,6 +23,9 @@ public sealed class ExchangeFlow : IExchangeFlow
 
     public FlowRing Ring => _worker.Flow;
 
+    /// <summary>Whether the worker has picked up <see cref="MarketEngine.FlowEnabled"/> and writes to the ring (tests).</summary>
+    internal bool WritingRing => _worker.Handler?.Flow is not null;
+
     /// <summary>Levels changed by updates to a valid book, at any distance from the mid price; counted whether flow is enabled or not.</summary>
     public long BookChanges => _worker.BookChanges;
 
