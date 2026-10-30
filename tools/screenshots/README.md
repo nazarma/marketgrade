@@ -34,11 +34,13 @@ node tools/screenshots/serve.mjs
 node tools/screenshots/shoot.mjs                         # Overview, Live flow, Data health at 1440 x 900
 node tools/screenshots/record.mjs --seconds 20           # Live flow, 1920 x 1080, 20 s MP4
 node tools/screenshots/make-gif.mjs tools/screenshots/out/flow.mp4 docs/images/live-flow.gif \
-  --start 4 --seconds 7 --crop 1700:1080:220:0 --width 960 --fps 12
+  --start 6 --seconds 7 --crop 1656:648:242:16 --width 960 --fps 12
 oxipng -o 4 --strip safe tools/screenshots/out/*.png
 ```
 
-Output goes to `tools/screenshots/out/` (ignored by git). The scripts read `MARKETGRADE_PORT` and
+The crop is the Live flow title and canvas at 1920 x 1080. `record.mjs --frames <dir>` keeps the captured
+frames and ffmpeg's list of them, to encode again (for example losslessly, as the GIF's source) without
+recording again. Output goes to `tools/screenshots/out/` (ignored by git). The scripts read `MARKETGRADE_PORT` and
 `MARKETGRADE_TOKEN` (defaults 5299 and `screenshot-token`) and `APP_URL` (default `http://localhost:5173`);
 the backend accepts browser requests from that origin only. Chromium uses the GPU, as the app's web view does.
-Record Live flow while the market is busy, for example on a weekday between 13:30 and 16:00 UTC.
+Record Live flow while the market is busy; the Trades figure under the lanes shows how busy it is.

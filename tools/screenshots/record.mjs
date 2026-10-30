@@ -58,7 +58,7 @@ console.log(`${frames.length} frames over ${seconds.toFixed(1)} s (${(frames.len
 const ffmpeg = [
   "-y", "-loglevel", "error",
   "-f", "concat", "-safe", "0", "-i", path.join(frameDir, "frames.txt"),
-  "-vf", `fps=30,scale=${width}:${height}:flags=lanczos,format=yuv420p`,
+  "-vf", `fps=30,scale=${width}:${height}:flags=lanczos:in_range=full:out_range=tv,format=yuv420p`,
   "-c:v", "libx264", "-preset", "slow", "-crf", "18",
   "-movflags", "+faststart",
   path.resolve(values.out),
