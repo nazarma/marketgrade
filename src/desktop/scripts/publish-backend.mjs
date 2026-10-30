@@ -37,8 +37,12 @@ execFileSync(
     "--runtime", runtimeId,
     "--self-contained",
     "-p:PublishSingleFile=true",
-    // SQLite's native library goes inside the single file too.
+    // SQLite's and DuckDB's native libraries go inside the single file too.
     "-p:IncludeNativeLibrariesForSelfExtract=true",
+    // Compressing halves the installed size at no measurable start-up cost. The DMG, the .deb and the AppImage
+    // compress with zlib or gzip and come out the same size either way; the Windows installer compresses with
+    // LZMA, which shrinks the uncompressed file much further (43 MB instead of 58 MB), so Windows stays uncompressed.
+    `-p:EnableCompressionInSingleFile=${!runtimeId.startsWith("win-")}`,
     "--output", publishDir,
   ],
   { stdio: "inherit" },
