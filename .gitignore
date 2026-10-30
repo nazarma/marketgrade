@@ -26,3 +26,18 @@ src/desktop/binaries/
 !.vscode/extensions.json
 .DS_Store
 Thumbs.db
+
+# Working notes, recordings, data and media
+.work/
+*.mgrec
+*.mgrec.zst
+!tests/**/Fixtures/**/*.mgrec.zst
+*.duckdb
+*.duckdb.wal
+*.db
+*.db-shm
+*.db-wal
+*.mp4
+*.webm
+*.mov
+tools/screenshots/out/
