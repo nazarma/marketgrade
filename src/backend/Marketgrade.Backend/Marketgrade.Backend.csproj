@@ -6,4 +6,35 @@
   <ItemGroup>
     <ProjectReference Include="..\..\engine\Marketgrade.Engine\Marketgrade.Engine.csproj" />
   </ItemGroup>
+
+  <!--
+    A published backend carries only its own runtime's native code. NuGet already picks the runtime's folder,
+    but DuckDB has one universal macOS library for both architectures, so each macOS build keeps only its own
+    half (the slice keeps DuckDB's signature). Linux libraries come with their symbol tables, which a build on
+    Linux strips. Runs before the single-file bundle is made.
+  -->
+  <Target Name="ThinNativeLibraries" AfterTargets="ComputeResolvedFilesToPublishList"
+          Condition="'$(RuntimeIdentifier)' == 'osx-x64' Or '$(RuntimeIdentifier)' == 'osx-arm64' Or ('$(RuntimeIdentifier)' == 'linux-x64' And $([MSBuild]::IsOSPlatform('Linux')))">
+    <PropertyGroup>
+      <_ThinFolder>$(IntermediateOutputPath)thin/</_ThinFolder>
+      <_MacArchitecture Condition="'$(RuntimeIdentifier)' == 'osx-x64'">x86_64</_MacArchitecture>
+      <_MacArchitecture Condition="'$(RuntimeIdentifier)' == 'osx-arm64'">arm64</_MacArchitecture>
+    </PropertyGroup>
+    <ItemGroup>
+      <_UniversalDuckDb Include="@(ResolvedFileToPublish)" Condition="'%(Filename)%(Extension)' == 'libduckdb.dylib'" />
+      <_LinuxNative Include="@(ResolvedFileToPublish)" Condition="'$(RuntimeIdentifier)' == 'linux-x64' And ('%(Filename)%(Extension)' == 'libduckdb.so' Or '%(Filename)%(Extension)' == 'libe_sqlite3.so')" />
+    </ItemGroup>
+    <Error Condition="'$(_MacArchitecture)' != '' And !$([MSBuild]::IsOSPlatform('OSX'))"
+           Text="macOS backends are published on macOS: lipo is needed to keep only one architecture of DuckDB." />
+    <MakeDir Directories="$(_ThinFolder)" />
+    <Exec Condition="'@(_UniversalDuckDb)' != ''"
+          Command="lipo -thin $(_MacArchitecture) &quot;%(_UniversalDuckDb.FullPath)&quot; -output &quot;$(_ThinFolder)%(_UniversalDuckDb.Filename)%(_UniversalDuckDb.Extension)&quot;" />
+    <Exec Condition="'@(_LinuxNative)' != ''"
+          Command="strip --strip-unneeded -o &quot;$(_ThinFolder)%(_LinuxNative.Filename)%(_LinuxNative.Extension)&quot; &quot;%(_LinuxNative.FullPath)&quot;" />
+    <ItemGroup>
+      <_ThinNative Include="@(_UniversalDuckDb->'$(_ThinFolder)%(Filename)%(Extension)');@(_LinuxNative->'$(_ThinFolder)%(Filename)%(Extension)')" />
+      <ResolvedFileToPublish Remove="@(_UniversalDuckDb);@(_LinuxNative)" />
+      <ResolvedFileToPublish Include="@(_ThinNative)" />
+    </ItemGroup>
+  </Target>
 </Project>
