@@ -32,6 +32,29 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "publisher": "Nazar Martincenco",
+    "copyright": "Copyright (c) 2026 Nazar Martincenco",
+    "license": "MIT",
+    "category": "Finance",
+    "shortDescription": "Measures market data health on crypto exchanges",
+    "longDescription": "Marketgrade measures how good the public market data of Kraken, Coinbase and Binance is: delay, gaps and correctness checks per exchange, live on this computer.",
+    "resources": {
+      "../../LICENSE": "LICENSE.txt",
+      "../../THIRD-PARTY-NOTICES.md": "THIRD-PARTY-NOTICES.txt"
+    },
+    "macOS": {
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-",
+      "hardenedRuntime": false
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
   }
 }
