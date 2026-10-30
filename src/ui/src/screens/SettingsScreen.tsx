@@ -1,4 +1,5 @@
 import { ScreenHeader } from "@/app/ScreenHeader";
+import { AboutSection } from "@/screens/settings/AboutSection";
 import { HistorySettingsForm } from "@/screens/settings/HistorySettingsForm";
 import { RecordingSettingsForm } from "@/screens/settings/RecordingSettingsForm";
 
@@ -11,6 +12,7 @@ export function SettingsScreen() {
       />
       <RecordingSettingsForm />
       <HistorySettingsForm />
+      <AboutSection />
     </>
   );
 }
