@@ -7,5 +7,7 @@
     <LangVersion>latest</LangVersion>
     <UseArtifactsOutput>true</UseArtifactsOutput>
     <Version>0.1.0</Version>
+    <!-- No ICU: numbers and dates format the same on every computer, and Linux needs no libicu. -->
+    <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 </Project>
