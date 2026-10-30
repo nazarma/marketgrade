@@ -1,0 +1,200 @@
+name: Release
+
+# Manual runs only, from the Actions tab. Builds every installer, smoke-tests each backend and creates a
+# draft GitHub release; publishing the draft is done by hand. See docs/releasing.md.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, without the v (must equal the version in package.json)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  VERSION: ${{ inputs.version }}
+
+jobs:
+  check:
+    name: Check version and changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - name: Every file has the requested version
+        run: |
+          node tools/release/version.mjs check
+          actual="$(node -p "require('./package.json').version")"
+          if [ "$actual" != "$VERSION" ]; then
+            echo "::error::Requested $VERSION but package.json has $actual"
+            exit 1
+          fi
+      - name: The changelog has an entry
+        run: node tools/release/changelog.mjs "$VERSION"
+      - name: The tag does not exist yet
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null; then
+            echo "::error::Tag v$VERSION already exists"
+            exit 1
+          fi
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            os: macos-15
+            target: aarch64-apple-darwin
+            # The app bundle is kept so its signature can be checked.
+            bundles: app,dmg
+          # The last Intel macOS image; GitHub plans to retire it in fall 2027.
+          - name: macOS Intel
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+          - name: Windows x64
+            os: windows-2025
+            target: x86_64-pc-windows-msvc
+            bundles: nsis
+          # The oldest Ubuntu image, for the oldest glibc the Linux builds need (2.35).
+          - name: Linux x64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            bundles: appimage,deb
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Tauri system packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            file \
+            libfuse2 \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libxdo-dev \
+            patchelf
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+      - uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: nuget-${{ runner.os }}-${{ runner.arch }}-
+
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/desktop
+          key: ${{ matrix.target }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Publish the backend sidecar
+        run: pnpm publish:backend "$TARGET"
+
+      - name: Smoke test the backend
+        run: |
+          suffix=""
+          if [ "$RUNNER_OS" = "Windows" ]; then suffix=".exe"; fi
+          node tools/release/smoke-sidecar.mjs "src/desktop/binaries/marketgrade-backend-$TARGET$suffix"
+
+      - name: Build the installers
+        run: pnpm tauri build --target "$TARGET" --bundles ${{ matrix.bundles }} --config src/desktop/tauri.release.conf.json
+
+      # Tauri signs the sidecar again inside the app; this is the copy users run.
+      - name: Check the signature and smoke test the backend inside the app
+        if: runner.os == 'macOS'
+        run: |
+          app="src/desktop/target/$TARGET/release/bundle/macos/Marketgrade.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign -dv "$app" 2>&1 | grep -E 'Identifier|Format|Signature'
+          codesign -dv "$app/Contents/MacOS/marketgrade-backend" 2>&1 | grep -E 'Identifier|Format|Signature'
+          node tools/release/smoke-sidecar.mjs "$app/Contents/MacOS/marketgrade-backend"
+
+      - name: Collect the installers
+        run: |
+          mkdir -p dist
+          find "src/desktop/target/$TARGET/release/bundle" -maxdepth 2 -type f \
+            \( -name '*.dmg' -o -name '*-setup.exe' -o -name '*.AppImage' -o -name '*.deb' \) \
+            -exec cp {} dist/ \;
+          ls dist/* > /dev/null
+          {
+            echo "### ${{ matrix.name }}"
+            echo
+            echo "| File | Size |"
+            echo "| ---- | ---: |"
+            for file in dist/* src/desktop/binaries/marketgrade-backend-*; do
+              bytes=$(wc -c < "$file" | tr -d ' ')
+              echo "| $(basename "$file") | $(awk "BEGIN { printf \"%.1f MB\", $bytes / 1000000 }") |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: installers-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Create draft release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: installers-*
+          merge-multiple: true
+          path: dist
+      - name: Checksums
+        working-directory: dist
+        run: |
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node tools/release/changelog.mjs "$VERSION" > notes.md
+          gh release create "v$VERSION" dist/* \
+            --draft \
+            --target "$GITHUB_SHA" \
+            --title "Marketgrade $VERSION" \
+            --notes-file notes.md
