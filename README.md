@@ -128,7 +128,7 @@ More in [docs/architecture.md](docs/architecture.md).
 | What | Result | How |
 | ---- | ------ | --- |
 | Memory allocated per message | **0 bytes** | BenchmarkDotNet's memory diagnoser over the hot path (receive, stamp, queue, classify, record, release) and each exchange's book worker. |
-| Processing time per message | **4 to 10 µs** | Parse, apply and check: BenchmarkDotNet medians over 500 real recorded messages per exchange (Kraken 4.0, Coinbase 6.9, Binance 9.4 µs) on an Intel Core i7-9750H. Live medians in a 90-second run: 7 to 45 µs. |
+| Processing time per message | **2 to 11 µs** | Parse, apply and check: BenchmarkDotNet medians over 500 real recorded messages per exchange (Kraken 2.4, Coinbase 7.8, Binance 11.3 µs) on an Intel Core i7-9750H; runs vary by about a microsecond. Live medians in a 90-second run: 7 to 45 µs. |
 | Recording compression | **6:1 to 11:1** | One recorded hour per exchange, zstd level 3, bytes on disk before and after (Binance 6.1, Kraken 7.7, Coinbase 11.0). |
 
 ## Building from source

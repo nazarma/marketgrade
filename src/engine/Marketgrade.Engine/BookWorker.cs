@@ -38,6 +38,9 @@ internal sealed class BookWorker
 
     private static readonly double s_nsPerTick = 1e9 / Stopwatch.Frequency;
 
+    // The catch-up window on the monotonic clock, so a step of the wall clock cannot move a message in or out of it.
+    private static readonly long s_catchUpWindowTicks = (long)(CatchUpWindowNs / s_nsPerTick);
+
     private readonly ExchangeAdapter _adapter;
     private readonly ExchangeConnection _connection;
     private readonly ChannelReader<MessageBuffer> _reader;
@@ -273,6 +276,9 @@ internal sealed class BookWorker
     /// <summary>The book's handler, for benchmarks that drive <see cref="Process"/> themselves.</summary>
     internal BookHandler? Handler => _handler;
 
+    /// <summary>The current minute's statistics, before they are published (tests).</summary>
+    internal MinuteRecorder Minutes => _minutes;
+
     /// <summary>Starts the worker thread; without rules the exchange keeps no book and only counts messages.</summary>
     public void Start(PairRules? rules)
     {
@@ -375,7 +381,7 @@ internal sealed class BookWorker
                 if (_handler is not BinanceBookHandler)
                 {
                     // Kraken and Coinbase: this message is the snapshot.
-                    StartCatchUp(buffer.ArrivalUnixNs);
+                    StartCatchUp(buffer.ReceivedTimestamp);
                 }
                 Repaired();
             }
@@ -390,13 +396,13 @@ internal sealed class BookWorker
                 switch (_ntpClock.Read(buffer.ReceivedTimestamp, out var ntp))
                 {
                     case ClockReading.Known:
-                        RecordDelay(buffer.ArrivalUnixNs, ntp - exchangeTime);
+                        RecordDelay(buffer.ReceivedTimestamp, ntp - exchangeTime);
                         break;
                     case ClockReading.Held:
                         Interlocked.Increment(ref _delaySkipped);
                         break;
                     default:
-                        RecordDelay(buffer.ArrivalUnixNs, buffer.ArrivalUnixNs - exchangeTime);
+                        RecordDelay(buffer.ReceivedTimestamp, buffer.ArrivalUnixNs - exchangeTime);
                         break;
                 }
             }
@@ -448,12 +454,12 @@ internal sealed class BookWorker
     }
 
     /// <summary>A delay goes to the statistics, or to the catch-up counters if the message arrived right after a snapshot.</summary>
-    private void RecordDelay(long arrivalUnixNs, long delayNs)
+    private void RecordDelay(long arrivalTimestamp, long delayNs)
     {
         if (_catchUpStart != long.MinValue)
         {
-            var sinceSnapshot = arrivalUnixNs - _catchUpStart;
-            if (sinceSnapshot >= 0 && sinceSnapshot <= CatchUpWindowNs)
+            var sinceSnapshot = arrivalTimestamp - _catchUpStart;
+            if (sinceSnapshot >= 0 && sinceSnapshot <= s_catchUpWindowTicks)
             {
                 Interlocked.Increment(ref _catchUpMessages);
                 _minutes.CatchUp++;
@@ -473,10 +479,10 @@ internal sealed class BookWorker
         }
     }
 
-    /// <summary>Opens the catch-up window at a snapshot; the counters start again.</summary>
-    private void StartCatchUp(long snapshotUnixNs)
+    /// <summary>Opens the catch-up window at a snapshot's <see cref="Stopwatch"/> timestamp; the counters start again.</summary>
+    private void StartCatchUp(long snapshotTimestamp)
     {
-        _catchUpStart = snapshotUnixNs;
+        _catchUpStart = snapshotTimestamp;
         Interlocked.Exchange(ref _catchUpMessages, 0);
         Interlocked.Exchange(ref _catchUpMaxDelay, 0);
     }
@@ -687,7 +693,7 @@ internal sealed class BookWorker
                 if (outcome != HandleOutcome.Failed)
                 {
                     // Events that arrive from now on may have waited for the snapshot to be applied.
-                    StartCatchUp((_time.GetUtcNow().UtcTicks - DateTime.UnixEpoch.Ticks) * 100);
+                    StartCatchUp(Stopwatch.GetTimestamp());
                 }
                 if (outcome == HandleOutcome.Synced)
                 {

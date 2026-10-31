@@ -37,7 +37,8 @@ public sealed class CatchUpTests : IDisposable
 
         Process(_lines[2], arrival);
         Process(_lines[3], arrival + 100 * Ms);
-        Process(_lines[4], arrival + 100 * Ms + 1);
+        // One microsecond later, above any monotonic clock's tick.
+        Process(_lines[4], arrival + 100 * Ms + 1_000);
         Process(_lines[5], arrival + 500 * Ms);
 
         Assert.Equal(2, _worker.CatchUpMessages);
@@ -61,12 +62,30 @@ public sealed class CatchUpTests : IDisposable
         Assert.Equal(60_700 * Ms, _worker.CatchUpMaxDelayNs);
     }
 
+    [Theory]
+    [InlineData(2_000)]
+    [InlineData(-2_000)]
+    public void A_wall_clock_step_right_after_the_snapshot_moves_nothing_out_of_the_window(long stepMs)
+    {
+        var arrival = Timestamp(_lines[2]) + 900 * Ms;
+
+        Process(_lines[2], arrival);
+        // macOS sets the wall clock right after the snapshot; the monotonic clock goes on.
+        Process(_lines[3], arrival + 50 * Ms, wallStepNs: stepMs * Ms);
+        Process(_lines[4], arrival + 500 * Ms, wallStepNs: stepMs * Ms);
+
+        Assert.Equal(2, _worker.CatchUpMessages);
+        _worker.PublishStatistics(Stopwatch.GetTimestamp());
+        Assert.Equal(1, _worker.DelayCount);
+    }
+
     public void Dispose() => _http.Dispose();
 
-    private void Process(string message, long arrivalUnixNs, long connectionId = 1)
+    /// <param name="wallStepNs">How far the wall clock was set since the start; the monotonic arrival stays at <paramref name="arrivalUnixNs"/>.</param>
+    private void Process(string message, long arrivalUnixNs, long connectionId = 1, long wallStepNs = 0)
     {
         var buffer = TestMessages.Buffer(_pool, message, connectionId: connectionId, arrivalUnixNs: arrivalUnixNs);
-        buffer.ReceivedTimestamp = Stopwatch.GetTimestamp();
+        buffer.ArrivalUnixNs += wallStepNs;
         _worker.Process(buffer);
     }
 

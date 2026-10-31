@@ -10,9 +10,6 @@ public interface IClockTarget
 
     /// <summary>Skip delays until the next <see cref="Sync"/>.</summary>
     void Hold();
-
-    /// <summary>Forget the last sync: delays are uncorrected until the next one.</summary>
-    void Clear();
 }
 
 /// <summary>
@@ -23,7 +20,8 @@ public interface IClockTarget
 /// at its measured rate (macOS stepped or slewed the time, or the rate is not known yet). Either way delays
 /// are held until a sync at once. The rate starts over after sleep and after a step, a jump of more than
 /// 10 ms between two checks; a slow parting is a slew or the rate error, and keeps it. When no server
-/// answers it tries again after a minute and the last sync stays, except after sleep; two failures in a row
+/// answers it tries again after a minute and the last sync stays, except after sleep: the monotonic clock
+/// stopped, so the last sync no longer holds and delays stay held until a sync succeeds. Two failures in a row
 /// also start the rate over.
 /// </summary>
 public sealed class ClockSync(
@@ -59,6 +57,9 @@ public sealed class ClockSync(
     private long? _dueTimestamp;
     private int _failures;
 
+    // Woke from sleep and no server has answered since: delays are held until one does.
+    private bool _heldAfterSleep;
+
     // The sync the engine has, to take back after a hold when the sync after a step fails.
     private (long NtpUnixNs, long Timestamp, double Rate)? _applied;
 
@@ -82,15 +83,13 @@ public sealed class ClockSync(
         {
             target.Hold();
             Rate.Reset();
+            // The monotonic clock stopped during sleep, so the last sync no longer holds and is never given back;
+            // delays stay held until a sync succeeds.
+            _applied = null;
+            _heldAfterSleep = true;
             if (await SyncAsync(cancellationToken))
             {
                 logger.LogInformation("Clock re-synced after sleep");
-            }
-            else if (_applied is not null)
-            {
-                // The monotonic clock stopped during sleep, so the last sync no longer holds.
-                target.Clear();
-                _applied = null;
             }
         }
         else if (_dueTimestamp is not { } due || _time.GetTimestamp() >= due)
@@ -157,6 +156,7 @@ public sealed class ClockSync(
             target.Sync(sample.NtpUnixNs, sample.Timestamp, Rate.Rate);
             _applied = (sample.NtpUnixNs, sample.Timestamp, Rate.Rate);
             _failures = 0;
+            _heldAfterSleep = false;
             (_wallUnixNs, _timestamp) = (sample.WallUnixNs, sample.Timestamp);
             var level = sample.Offset.Duration() > WarnAbove ? LogLevel.Warning : LogLevel.Information;
             logger.Log(level, "Clock offset {Offset:0.0} ms from {Server} (round trip {RoundTrip:0.0} ms, monotonic clock {Rate:+0.0;-0.0;0} ppm)",
@@ -168,9 +168,11 @@ public sealed class ClockSync(
             {
                 Rate.Reset();
             }
-            logger.LogWarning(_applied is null
-                ? "No time server answered; delays are shown without clock correction"
-                : "No time server answered; delays stay on the last sync");
+            logger.LogWarning(_heldAfterSleep
+                ? "No time server answered; delays stay held until one does"
+                : _applied is null
+                    ? "No time server answered; delays are shown without clock correction"
+                    : "No time server answered; delays stay on the last sync");
             // Parted clocks are measured from now on, so a failed sync is not tried again every second.
             (_wallUnixNs, _timestamp) = (WallUnixNs(), _time.GetTimestamp());
         }

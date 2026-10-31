@@ -324,12 +324,16 @@ messages and logged; the replay then reports the Binance range as missing a snap
   clock sync plus the monotonic time from that sync to the message's `Stopwatch` timestamp, corrected by
   the monotonic clock's measured rate error, so a step of the wall clock changes no delay; before the
   first sync it is the arrival time. While the clock is synced again after a step or a wake from sleep
-  no delay is measured; those messages are counted (`delaySkipped` in the status). Recorded arrival
-  times stay wall-clock. The delay covers the way from the exchange to this computer, nothing after the
+  no delay is measured (after a wake, until a sync succeeds); those messages are counted (`delaySkipped`
+  in the status). Recorded arrival times stay wall-clock. The delay covers the way from the exchange to this computer, nothing after the
   arrival. Catch-up messages are not part of it (below).
-- *Catch-up*: a message whose arrival time is at most 100 ms after a snapshot's (the snapshot itself
-  included) is catch-up. For Kraken and Coinbase the snapshot is the WebSocket message that rebuilt
-  the book; for Binance the window starts when the REST snapshot is applied. Coinbase sends its
+- *Catch-up*: a message whose monotonic arrival timestamp is at most 100 ms after a snapshot's (the
+  snapshot itself included) is catch-up. For Kraken and Coinbase the snapshot is the WebSocket message
+  that rebuilt the book; for Binance the window starts when the REST snapshot is applied. The window is
+  on the monotonic clock because a reconnect, and with it a snapshot, often comes right as macOS sets the
+  wall clock (after a wake): measured on wall-clock arrival times, a 2 s step pushed the catch-up out of
+  the window and into the delays, and on 31 October the worst delay after a wake read 2.1 s on all three
+  exchanges. Coinbase sends its
   4.5 MB snapshot as one message, and the updates sent while it travels queue behind it and arrive
   together right after it: their delay is the snapshot's transfer time (300 to 900 ms measured), not
   the exchange's. Catch-up messages are left out of the delay histogram and counted instead: how
@@ -384,7 +388,7 @@ in a row.
 (`CLOCK_MONOTONIC_RAW` on macOS, `CLOCK_BOOTTIME` on Linux, the tick count on Windows) getting more
 than 1 s ahead of `Stopwatch`, which stops during sleep on macOS and Linux, is a wake: delays are held,
 it syncs at once and logs "Clock re-synced after sleep"; without an answer the last sync no longer
-holds and delays are uncorrected until the next. Otherwise, when the wall clock has moved more than
+holds (the monotonic clock stopped) and delays stay held until a sync succeeds, tried every minute. Otherwise, when the wall clock has moved more than
 20 ms away from the monotonic clock (at its measured rate) since the last sync, macOS stepped or slewed
 the time, or the rate is not known yet: it logs "Clock corrected by X ms", holds delays and syncs at
 once; without an answer the last sync stays, as a step of the wall clock does not move the monotonic
@@ -472,18 +476,22 @@ records; the engine only ever calls `TryWrite`.
 **Measured.**
 
 On the development machine (Intel Core i7-9750H), with 500 real messages after the first valid
-book of each exchange's recorded minute, BenchmarkDotNet medians per message, all with 0 bytes
-allocated:
+book of each exchange's recorded minute, BenchmarkDotNet medians per message (31 October), all with
+0 bytes allocated:
 
 | Exchange | Parse, apply, check | Whole worker path |
 | -------- | ------------------: | ----------------: |
-| Kraken   |              4.0 µs |            2.4 µs |
-| Coinbase |              6.9 µs |            7.0 µs |
-| Binance  |              9.4 µs |            9.5 µs |
+| Kraken   |              2.4 µs |            4.5 µs |
+| Coinbase |              7.8 µs |            7.9 µs |
+| Binance  |             11.3 µs |            9.6 µs |
 
-The whole worker path adds classifying, statistics and the release; Kraken's numbers vary between
-runs (standard deviation about 1.4 µs). With the flow rings on, the worker path is 0.1 to 0.2 µs
-slower; writing one flow event takes about 12 ns. Handling one trade message (classify, parse, write
+The whole worker path adds classifying, delay and catch-up, statistics and the release. Its buffers carry
+a monotonic stamp with the recording's spacing and the clock is synced to the recording, so delays and
+the catch-up window work as live. The numbers vary between runs by about a microsecond (Kraken's standard
+deviation is 1.3 to 1.9 µs; an earlier run gave 4.0 and 2.4 µs for Kraken, 6.9 and 7.0 for Coinbase, 9.4
+and 9.5 for Binance), which is also why Binance's parse alone can come out above its whole path. With the
+flow rings on, the worker path is up to a microsecond slower, within that noise; writing one flow event
+takes about 12 ns. Handling one trade message (classify, parse, write
 to the ring) takes 0.5 to 0.6 µs. All of these allocate nothing. Parsing one decimal takes 27 ns, one ISO 8601 timestamp 35 ns,
 and the Kraken checksum 400 ns. Receiving, queueing, waking the worker, classifying and releasing a
 message (the hot path benchmark, without a book) stay at 530 to 600 ns, 680 to 820 ns with recording.

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 
 namespace Marketgrade.Engine.Tests.Books;
@@ -23,6 +24,8 @@ internal static class TestMessages
         buffer.Seq = seq;
         buffer.ConnectionId = connectionId;
         buffer.ArrivalUnixNs = arrivalUnixNs;
+        // A monotonic stamp with the same spacing as the arrival times, as the connection takes both together.
+        buffer.ReceivedTimestamp = (long)((Int128)arrivalUnixNs * Stopwatch.Frequency / 1_000_000_000);
         buffer.Counter = 1;
         return buffer;
     }

@@ -159,7 +159,7 @@ public class ClockSyncTests
     }
 
     [Fact]
-    public async Task After_sleep_without_an_answer_the_last_sync_is_dropped()
+    public async Task After_sleep_without_an_answer_delays_stay_held_until_a_sync_succeeds()
     {
         var sync = Sync();
         await sync.TickAsync(Token);
@@ -167,8 +167,18 @@ public class ClockSyncTests
 
         _time.Sleep(TimeSpan.FromMinutes(30));
         await sync.TickAsync(Token);
+        Assert.Equal(["sync", "hold"], _target.Calls);
+        Assert.Contains("No time server answered; delays stay held until one does", _logs);
 
-        Assert.Equal(["sync", "hold", "clear"], _target.Calls);
+        // The wall clock went on during sleep and the monotonic clock did not; the stale sync is not given back.
+        _time.Advance(TimeSpan.FromSeconds(30));
+        await sync.TickAsync(Token);
+        Assert.Equal(["sync", "hold"], _target.Calls);
+
+        _silent = false;
+        _time.Advance(TimeSpan.FromSeconds(31));
+        await sync.TickAsync(Token);
+        Assert.Equal(["sync", "hold", "sync"], _target.Calls);
     }
 
     [Fact]
@@ -298,8 +308,6 @@ public class ClockSyncTests
         }
 
         public void Hold() => Calls.Add("hold");
-
-        public void Clear() => Calls.Add("clear");
     }
 
     private sealed class ListLogger(List<string> logs) : ILogger

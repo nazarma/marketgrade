@@ -30,6 +30,11 @@ public class BookBenchmarks
     private BookWorker _worker = null!;
     private HttpClient _http = null!;
 
+    // The recording's first arrival and a monotonic timestamp standing for it, so every buffer gets a monotonic
+    // stamp with the recorded spacing, as the connection takes it with the arrival time.
+    private long _firstArrivalUnixNs;
+    private long _firstTimestamp;
+
     [Params("kraken", "coinbase", "binance")]
     public string Exchange { get; set; } = "";
 
@@ -40,6 +45,8 @@ public class BookBenchmarks
     public void Setup()
     {
         _records = Fixtures.Records(Exchange);
+        _firstArrivalUnixNs = _records[0].Header.ArrivalUnixNs;
+        _firstTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
         _pool = new MessageBufferPool(Updates + 64, new EngineOptions().BufferSize);
         _http = new HttpClient();
     }
@@ -156,15 +163,20 @@ public class BookBenchmarks
         buffer.Seq = header.Seq;
         buffer.ConnectionId = header.ConnectionId;
         buffer.ArrivalUnixNs = header.ArrivalUnixNs;
+        buffer.ReceivedTimestamp = _firstTimestamp
+            + (long)((Int128)(header.ArrivalUnixNs - _firstArrivalUnixNs) * System.Diagnostics.Stopwatch.Frequency / 1_000_000_000);
         buffer.Counter = 1;
         return buffer;
     }
 
-    /// <summary>Synced, so every delay goes through the NTP time from the monotonic clock.</summary>
-    private static NtpClock SyncedClock()
+    /// <summary>
+    /// Synced to the recording, so every delay goes through the NTP time from the monotonic clock and comes out
+    /// as recorded, and the catch-up window works on the monotonic stamps as live.
+    /// </summary>
+    private NtpClock SyncedClock()
     {
         var clock = new NtpClock();
-        clock.Sync((DateTime.UtcNow.Ticks - DateTime.UnixEpoch.Ticks) * 100, System.Diagnostics.Stopwatch.GetTimestamp());
+        clock.Sync(_firstArrivalUnixNs, _firstTimestamp);
         return clock;
     }
 }

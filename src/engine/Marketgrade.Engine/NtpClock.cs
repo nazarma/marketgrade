@@ -40,9 +40,6 @@ internal sealed class NtpClock
         }
     }
 
-    /// <summary>Forgets the sync: delays use the wall clock again, as before the first sync.</summary>
-    public void Clear() => Volatile.Write(ref _anchor, null);
-
     /// <summary>NTP time at a <see cref="Stopwatch"/> timestamp, Unix nanoseconds, when it is <see cref="ClockReading.Known"/>.</summary>
     public ClockReading Read(long timestamp, out long unixNs)
     {

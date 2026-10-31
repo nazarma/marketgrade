@@ -131,9 +131,6 @@ public sealed class MarketEngine : IAsyncDisposable
     /// <summary>The clocks parted (a step or a wake from sleep): delays are skipped and counted until the next <see cref="SyncClock"/>.</summary>
     public void HoldClock() => _ntpClock.Hold();
 
-    /// <summary>The last sync no longer holds (a wake from sleep without a new sync): delays use the wall clock again.</summary>
-    public void ClearClock() => _ntpClock.Clear();
-
     /// <summary>
     /// The latest copy of an exchange's best levels (by name, any case), or null if there is none yet or no
     /// such exchange. Copies are published only while read, so after a quiet period the first one may be old.

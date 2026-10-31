@@ -66,9 +66,7 @@ public sealed class NegativeDelayTests : IDisposable
 
     private void Process(string message, long arrivalUnixNs)
     {
-        var buffer = TestMessages.Buffer(_pool, message, connectionId: 1, arrivalUnixNs: arrivalUnixNs);
-        buffer.ReceivedTimestamp = Stopwatch.GetTimestamp();
-        _worker.Process(buffer);
+        _worker.Process(TestMessages.Buffer(_pool, message, connectionId: 1, arrivalUnixNs: arrivalUnixNs));
     }
 
     private static long Timestamp(string message)

@@ -33,7 +33,5 @@ public sealed class ClockSyncService(
         public void Sync(long ntpUnixNs, long timestamp, double rate) => engine.SyncClock(ntpUnixNs, timestamp, rate);
 
         public void Hold() => engine.HoldClock();
-
-        public void Clear() => engine.ClearClock();
     }
 }
