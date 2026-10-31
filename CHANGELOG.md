@@ -2,7 +2,7 @@
 
 All notable changes to Marketgrade are listed here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [0.1.0] - 2026-10-30
+## [0.1.0] - 2026-10-31
 
 The first public release, for macOS (Apple Silicon and Intel), Windows and Linux. The installers are not
 code signed; the README explains how to open them.
