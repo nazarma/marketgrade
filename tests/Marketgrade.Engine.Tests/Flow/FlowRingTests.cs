@@ -98,14 +98,21 @@ public class FlowRingTests
     {
         var ring = new FlowRing(64);
         WriteMany(ring, 64);
+        // A first pass lets the runtime finish compiling the loop; it can allocate while it does.
+        WriteRange(ring, 64, 100_064);
 
         var before = GC.GetAllocatedBytesForCurrentThread();
-        for (long seq = 64; seq < 100_064; seq++)
-        {
-            ring.Write(EventAt(seq));
-        }
+        WriteRange(ring, 100_064, 200_064);
 
         Assert.Equal(0, GC.GetAllocatedBytesForCurrentThread() - before);
+
+        static void WriteRange(FlowRing ring, long from, long to)
+        {
+            for (var seq = from; seq < to; seq++)
+            {
+                ring.Write(EventAt(seq));
+            }
+        }
     }
 
     [Fact]
